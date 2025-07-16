@@ -1,30 +1,28 @@
 {
   "name": "purepeg-price-update",
-  "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "main": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JDY-exe/PurePEG-price-update.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/JDY-exe/PurePEG-price-update/issues"
+  },
+  "homepage": "https://github.com/JDY-exe/PurePEG-price-update#readme",
+  "description": "",
   "dependencies": {
-    "@tailwindcss/vite": "^4.1.11",
-    "lucide-react": "^0.525.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "tailwindcss": "^4.1.11"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.30.1",
-    "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
-    "@vitejs/plugin-react": "^4.6.0",
-    "eslint": "^9.30.1",
-    "eslint-plugin-react-hooks": "^5.2.0",
-    "eslint-plugin-react-refresh": "^0.4.20",
-    "globals": "^16.3.0",
-    "vite": "^7.0.4"
+    "@woocommerce/woocommerce-rest-api": "^1.0.2",
+    "axios": "^1.10.0",
+    "dotenv": "^17.2.0",
+    "fs": "^0.0.1-security",
+    "inquirer": "^12.7.0",
+    "xlsx": "^0.18.5"
   }
 }

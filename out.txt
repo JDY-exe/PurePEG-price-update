@@ -1,0 +1,253 @@
+[
+  {
+    "id": 17844,
+    "type": "variation",
+    "date_created": "2025-07-01T16:29:08",
+    "date_created_gmt": "2025-07-01T16:29:08",
+    "date_modified": "2025-07-15T21:42:50",
+    "date_modified_gmt": "2025-07-15T21:42:50",
+    "description": "",
+    "permalink": "https://dev.purepeg.com/product/bocnh-peg4-ch2ch2br/?attribute_pa_item=4324904-5",
+    "sku": "4324904",
+    "global_unique_id": "",
+    "price": "0.99",
+    "regular_price": "0.99",
+    "sale_price": "",
+    "date_on_sale_from": null,
+    "date_on_sale_from_gmt": null,
+    "date_on_sale_to": null,
+    "date_on_sale_to_gmt": null,
+    "on_sale": false,
+    "status": "publish",
+    "purchasable": true,
+    "virtual": false,
+    "downloadable": false,
+    "downloads": [],
+    "download_limit": -1,
+    "download_expiry": -1,
+    "tax_status": "taxable",
+    "tax_class": "",
+    "manage_stock": false,
+    "stock_quantity": null,
+    "stock_status": "instock",
+    "backorders": "no",
+    "backorders_allowed": false,
+    "backordered": false,
+    "low_stock_amount": null,
+    "weight": "5",
+    "dimensions": {
+      "length": "",
+      "width": "",
+      "height": ""
+    },
+    "shipping_class": "unstable-items",
+    "shipping_class_id": 17744,
+    "image": {
+      "id": 11504,
+      "date_created": "2025-01-08T15:56:12",
+      "date_created_gmt": "2025-01-08T15:56:12",
+      "date_modified": "2025-04-04T09:51:06",
+      "date_modified_gmt": "2025-04-04T09:51:06",
+      "src": "https://dev.purepeg.com/wp-content/uploads/2025/01/Group2.jpg",
+      "name": "Group2",
+      "alt": "polyethylene glycol brand name"
+    },
+    "attributes": [
+      {
+        "id": 1,
+        "name": "Item #",
+        "slug": "pa_item",
+        "option": "4324904-5"
+      }
+    ],
+    "menu_order": 2,
+    "meta_data": [
+      {
+        "id": 1520717,
+        "key": "_wc_gla_sync_status",
+        "value": "has-errors"
+      },
+      {
+        "id": 1520718,
+        "key": "_role_based_pricing_rules",
+        "value": []
+      },
+      {
+        "id": 1520719,
+        "key": "_customer_based_pricing_rules",
+        "value": []
+      },
+      {
+        "id": 1520720,
+        "key": "_purity",
+        "value": "min.95%"
+      },
+      {
+        "id": 1520722,
+        "key": "_vies_product_is_service",
+        "value": "no"
+      },
+      {
+        "id": 1520727,
+        "key": "_wc_gla_errors",
+        "value": [
+          "[description] This value should not be blank."
+        ]
+      }
+    ],
+    "name": "4324904-5",
+    "parent_id": 17842,
+    "_links": {
+      "self": [
+        {
+          "href": "https://dev.purepeg.com/wp-json/wc/v3/products/17842/variations/17844",
+          "targetHints": {
+            "allow": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ]
+          }
+        }
+      ],
+      "collection": [
+        {
+          "href": "https://dev.purepeg.com/wp-json/wc/v3/products/17842/variations"
+        }
+      ],
+      "up": [
+        {
+          "href": "https://dev.purepeg.com/wp-json/wc/v3/products/17842"
+        }
+      ]
+    }
+  },
+  {
+    "id": 17843,
+    "type": "variation",
+    "date_created": "2025-07-01T16:29:07",
+    "date_created_gmt": "2025-07-01T16:29:07",
+    "date_modified": "2025-07-01T16:30:45",
+    "date_modified_gmt": "2025-07-01T16:30:45",
+    "description": "",
+    "permalink": "https://dev.purepeg.com/product/bocnh-peg4-ch2ch2br/?attribute_pa_item=4324904-1",
+    "sku": "4324904",
+    "global_unique_id": "",
+    "price": "50",
+    "regular_price": "50",
+    "sale_price": "",
+    "date_on_sale_from": null,
+    "date_on_sale_from_gmt": null,
+    "date_on_sale_to": null,
+    "date_on_sale_to_gmt": null,
+    "on_sale": false,
+    "status": "publish",
+    "purchasable": true,
+    "virtual": false,
+    "downloadable": false,
+    "downloads": [],
+    "download_limit": -1,
+    "download_expiry": -1,
+    "tax_status": "taxable",
+    "tax_class": "",
+    "manage_stock": false,
+    "stock_quantity": null,
+    "stock_status": "onbackorder",
+    "backorders": "no",
+    "backorders_allowed": false,
+    "backordered": true,
+    "low_stock_amount": null,
+    "weight": "1",
+    "dimensions": {
+      "length": "",
+      "width": "",
+      "height": ""
+    },
+    "shipping_class": "unstable-items",
+    "shipping_class_id": 17744,
+    "image": {
+      "id": 11504,
+      "date_created": "2025-01-08T15:56:12",
+      "date_created_gmt": "2025-01-08T15:56:12",
+      "date_modified": "2025-04-04T09:51:06",
+      "date_modified_gmt": "2025-04-04T09:51:06",
+      "src": "https://dev.purepeg.com/wp-content/uploads/2025/01/Group2.jpg",
+      "name": "Group2",
+      "alt": "polyethylene glycol brand name"
+    },
+    "attributes": [
+      {
+        "id": 1,
+        "name": "Item #",
+        "slug": "pa_item",
+        "option": "4324904-1"
+      }
+    ],
+    "menu_order": 1,
+    "meta_data": [
+      {
+        "id": 1520708,
+        "key": "_wc_gla_sync_status",
+        "value": "has-errors"
+      },
+      {
+        "id": 1520709,
+        "key": "_role_based_pricing_rules",
+        "value": []
+      },
+      {
+        "id": 1520710,
+        "key": "_customer_based_pricing_rules",
+        "value": []
+      },
+      {
+        "id": 1520711,
+        "key": "_purity",
+        "value": "min.95%"
+      },
+      {
+        "id": 1520721,
+        "key": "_vies_product_is_service",
+        "value": "no"
+      },
+      {
+        "id": 1520725,
+        "key": "_wc_gla_errors",
+        "value": [
+          "[availabilityDate] Availability date is required if you set the product's availability to backorder or pre-order.",
+          "[description] This value should not be blank."
+        ]
+      }
+    ],
+    "name": "4324904-1",
+    "parent_id": 17842,
+    "_links": {
+      "self": [
+        {
+          "href": "https://dev.purepeg.com/wp-json/wc/v3/products/17842/variations/17843",
+          "targetHints": {
+            "allow": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ]
+          }
+        }
+      ],
+      "collection": [
+        {
+          "href": "https://dev.purepeg.com/wp-json/wc/v3/products/17842/variations"
+        }
+      ],
+      "up": [
+        {
+          "href": "https://dev.purepeg.com/wp-json/wc/v3/products/17842"
+        }
+      ]
+    }
+  }
+]
