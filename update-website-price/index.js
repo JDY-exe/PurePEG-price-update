@@ -1,25 +1,31 @@
 import fs from 'fs';
 import path from 'path';
 import inquirer from 'inquirer';
-import { fileURLToPath } from 'url';
 import XLSX from 'xlsx';
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const WORKING_DIR = __dirname;
-const META_DIR = path.join(WORKING_DIR, 'meta');
 
-// Ensure meta/ folder exists
+console.clear();
+// Root folder is passed in as argument
+const rootFolder = process.argv[2];
+if (!rootFolder) {
+  console.error("❌ Please pass the working folder path.");
+  process.exit(1);
+}
+
+const META_DIR = path.join(__dirname, 'meta');
 fs.mkdirSync(META_DIR, { recursive: true });
 
-// 🔍 Step 1: Prompt user for XLSM file
-const files = fs.readdirSync(WORKING_DIR).filter(f => (f.endsWith('.xlsm') || f.endsWith('.xlsx')));
+// Step 1: Prompt for Excel file
+const files = fs.readdirSync(rootFolder).filter(f => (f.endsWith('.xlsm') || f.endsWith('.xlsx')));
 if (files.length === 0) {
-  console.error('❌ No excel sheets found in current folder.');
+  console.error('❌ No .xlsm files found in folder:', rootFolder);
   process.exit(1);
 }
 
@@ -27,18 +33,17 @@ const { selectedFile } = await inquirer.prompt([
   {
     type: 'list',
     name: 'selectedFile',
-    message: '📂 Select the .xlsm file to use as the master database\nCaution: Ensure the first sheet of the .xlsm is the master database\n',
+    message: '📂 Select the Excel file to process:\nNote: First sheet in excel file has to be the master database\n\n',
     choices: files
   }
 ]);
 
-console.log(`Loading: ${selectedFile}`);
-const workbook = XLSX.readFile(path.join(WORKING_DIR, selectedFile));
-const firstSheetName = workbook.SheetNames[0];
-const sheet = workbook.Sheets[firstSheetName];
-const master_data = XLSX.utils.sheet_to_json(sheet).splice(0, 20);
+const workbook = XLSX.readFile(path.join(rootFolder, selectedFile));
+const firstSheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+const master_data = firstSheet;
 
-// ✅ Woo API setup
+
+
 const api = new WooCommerceRestApi.default({
   url: process.env.WC_API_URL,
   consumerKey: process.env.WC_KEY,
