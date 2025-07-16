@@ -73,7 +73,7 @@ for (const row of master_data) {
       regular_price: row["List Price"].toFixed(2)
     });
 
-    console.log(`Updated price for Item Number ${itemNumber}, Item ID ${variationId}. `);
+    console.log(`Updated item number ${itemNumber}, ID ${variationId}`);
     updatedItems.push({
       itemNumber,
       variationId,
@@ -147,6 +147,8 @@ const csvRows = updatedItems.map(entry =>
 );
 fs.writeFileSync(LOG_FILE, csvHeader + csvRows.join('\n'));
 console.log(`📝 Wrote update log to ${LOG_FILE}`);
+
+console.log(`✅ Updated ${updatedItems.length} items in total`);
 
 
 
