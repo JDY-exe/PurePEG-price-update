@@ -6,10 +6,9 @@ import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 console.clear();
 // Root folder is passed in as argument
@@ -40,7 +39,7 @@ const { selectedFile } = await inquirer.prompt([
 
 const workbook = XLSX.readFile(path.join(rootFolder, selectedFile));
 const firstSheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-const master_data = firstSheet;
+const master_data = firstSheet.splice;
 
 
 
