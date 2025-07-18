@@ -39,7 +39,7 @@ const { selectedFile } = await inquirer.prompt([
 
 const workbook = XLSX.readFile(path.join(rootFolder, selectedFile));
 const firstSheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-const master_data = firstSheet.splice(0, 20);
+const master_data = firstSheet;
 
 
 
