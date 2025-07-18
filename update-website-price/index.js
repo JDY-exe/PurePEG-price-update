@@ -39,7 +39,7 @@ const { selectedFile } = await inquirer.prompt([
 
 const workbook = XLSX.readFile(path.join(rootFolder, selectedFile));
 const firstSheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-const master_data = firstSheet.splice;
+const master_data = firstSheet.splice(0, 20);
 
 
 
@@ -52,6 +52,8 @@ const api = new WooCommerceRestApi.default({
 
 const CACHE_FILE = path.join(META_DIR, 'id_cache.json');
 const LOG_FILE = path.join(META_DIR, 'price_update_log.csv');
+const DEBUG_FILE = path.join(META_DIR, 'debug.csv');
+const BAR_LENGTH = 40;
 
 let itemCache = {};
 if (fs.existsSync(CACHE_FILE)) {
@@ -60,95 +62,114 @@ if (fs.existsSync(CACHE_FILE)) {
 }
 
 const updatedItems = [];
+const errors = [];
 
-for (const row of master_data) {
-  const itemNumber = row["Catalog Number"];
-  const sku = row.Item;
+for (const [index, product] of master_data.entries()) {
+  updateProgressBar(index, master_data.length);
+  const itemNumber = product["Catalog Number"];
+  const sku = product.Item;
+  const masterPrice = product["List Price"];
 
+  //If item is cached
   if (itemCache[itemNumber]) {
-    const { productId, variationId } = itemCache[itemNumber];
+    const { productId, variationId, price } = itemCache[itemNumber];
+    if (!price || price != masterPrice) {
+      await api.put(`products/${productId}/variations/${variationId}`, {
+        regular_price: masterPrice.toFixed(2)
+      });
 
-    // Update the variation price directly
-    await api.put(`products/${productId}/variations/${variationId}`, {
-      regular_price: row["List Price"].toFixed(2)
-    });
+      updatedItems.push({
+        itemNumber,
+        variationId,
+        sku,
+        regular_price: masterPrice,
+      });
 
-    console.log(`Updated item number ${itemNumber}, ID ${variationId}`);
-    updatedItems.push({
-      itemNumber,
-      variationId,
-      sku,
-      regular_price: row["Regular Price"],
-    });
+      itemCache[itemNumber].price = masterPrice;
+    }
     continue;
-
   }
 
+  //if item is not cached
   try {
     // Step 1: Get the main product by SKU
-    const productRes = await api.get(`products?sku=${row.Item}`);
+    const productRes = await api.get(`products?sku=${sku}&_fields=id`);
     const product = productRes.data[0];
     const productId = product?.id;
-    
+
     if (!productId) {
-      console.warn(`❌ No product found for SKU: ${row.Item}`);
+      errors.push({index, sku, itemNumber: 0, message: "No product found for SKU"})
+      console.warn(`❌ No product found for SKU: ${sku}`);
       continue;
     }
 
-    const variationRes = await api.get(`products/${productId}/variations`, {
+    const variationRes = await api.get(`products/${productId}/variations?_fields=id,sku,price,attributes`, {
       params: { per_page: 100 }
     });
 
     const variation = variationRes.data.find(variation => {
       return variation.attributes.some(attr =>
         attr.name.toLowerCase() == 'item #' &&
-        attr.option == row["Catalog Number"]
+        attr.option == itemNumber
       );
     });
 
     if (!variation) {
-      console.warn(`⚠️ Variation with item # ${row["Catalog Number"]} not found in SKU ${row.Item} (Product ID: ${productId})`);
+      errors.push({index, sku, itemNumber, message: "No variations found for product"})
+      console.warn(`⚠️ Variation with item # ${itemNumber} not found in SKU ${sku} (Product ID: ${productId})`);
       continue;
     }
 
-    const masterPrice = row["List Price"];
+    const masterPrice = product["List Price"];
     const variationId = variation.id;
 
     itemCache[itemNumber] = {
       variationId,
       productId,
-      sku
-    };
-
-    await api.put(`products/${productId}/variations/${variationId}`, {
-      regular_price: masterPrice.toFixed(2)
-    });
-    
-    updatedItems.push({
-      itemNumber,
-      variationId,
       sku,
-      regular_price: row["Regular Price"],
-    });
-
-    console.log(`Updated item number ${itemNumber}, ID ${variationId}`);
-
+      price: masterPrice ? masterPrice : 0
+    };
+    if (masterPrice) {
+      await api.put(`products/${productId}/variations/${variationId}`, {
+        regular_price: masterPrice.toFixed(2)
+      });
+      updatedItems.push({
+        itemNumber,
+        variationId,
+        sku,
+        regular_price: product["Regular Price"],
+      });
+      console.log(`Updated item number ${itemNumber}, ID ${variationId}`);
+    }
+    else {
+      errors.push({index, sku, itemNumber, message: "Price is zero or undefined for this product"})
+    }
   } catch (error) {
-    console.error(`❌ Error for SKU ${row.Item}:`, error.response?.data || error.message);
+    console.error(`❌ Error for SKU ${product.Item}:`, error.response?.data || error.message);
   }
 }
 
 fs.writeFileSync(CACHE_FILE, JSON.stringify(itemCache, null, 2));
-console.log(`📦 Saved updated cache to ${CACHE_FILE}`);
+console.log(`\n📦 Saved updated cache to ${CACHE_FILE}`);
 
-const csvHeader = 'Item Number,Variation ID,SKU,Regular Price\n';
-const csvRows = updatedItems.map(entry =>
+const logHeader = 'Item Number,Variation ID,SKU,Regular Price\n';
+const csvLog = updatedItems.map(entry =>
   `${entry.itemNumber},${entry.variationId},${entry.sku},${entry.regular_price}`
 );
-fs.writeFileSync(LOG_FILE, csvHeader + csvRows.join('\n'));
+fs.writeFileSync(LOG_FILE, logHeader + csvLog.join('\n'));
+const errorHeader = 'Line number (index),SKU,Catalog number (item #),Message\n';
+const csvErrors = errors.map(entry =>
+  `${entry.index},${entry.sku},${entry.itemNumber},${entry.message}`
+);
+fs.writeFileSync(DEBUG_FILE, errorHeader + csvErrors.join('\n'));
 console.log(`📝 Wrote update log to ${LOG_FILE}`);
-
 console.log(`✅ Updated ${updatedItems.length} items in total`);
 
+function updateProgressBar(index, total) {
+  const progress = (index + 1) / total;
+  const filled = Math.round(BAR_LENGTH * progress);
+  const bar = '='.repeat(filled) + '-'.repeat(BAR_LENGTH - filled);
+  const percent = (progress * 100).toFixed(1);
 
-
+  process.stdout.write(`\r[${bar}] ${index + 1}/${total} (${percent}%)`);
+}
