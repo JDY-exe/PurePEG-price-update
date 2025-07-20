@@ -65,27 +65,31 @@ const updatedItems = [];
 const errors = [];
 
 for (const [index, product] of master_data.entries()) {
-  updateProgressBar(index, master_data.length);
   const itemNumber = product["Catalog Number"];
   const sku = product.Item;
   const masterPrice = product["List Price"];
+  updateProgressBar(index, master_data.length, itemNumber);
 
   //If item is cached
   if (itemCache[itemNumber]) {
     const { productId, variationId, price } = itemCache[itemNumber];
-    if (!price || price != masterPrice) {
-      await api.put(`products/${productId}/variations/${variationId}`, {
-        regular_price: masterPrice.toFixed(2)
-      });
+    if ((!price || price != masterPrice) && masterPrice) {
+      try {
+        await api.put(`products/${productId}/variations/${variationId}`, {
+          regular_price: masterPrice.toFixed(2)
+        });
+        updatedItems.push({
+          itemNumber,
+          variationId,
+          sku,
+          regular_price: masterPrice,
+        });
 
-      updatedItems.push({
-        itemNumber,
-        variationId,
-        sku,
-        regular_price: masterPrice,
-      });
+        itemCache[itemNumber].price = masterPrice;
 
-      itemCache[itemNumber].price = masterPrice;
+      } catch (error) {
+        errors.push({ index, sku, itemNumber, message: error.message })
+      }
     }
     continue;
   }
@@ -98,7 +102,7 @@ for (const [index, product] of master_data.entries()) {
     const productId = product?.id;
 
     if (!productId) {
-      errors.push({index, sku, itemNumber: 0, message: "No product found for SKU"})
+      errors.push({ index, sku, itemNumber: 0, message: "No product found for SKU" })
       console.warn(`❌ No product found for SKU: ${sku}`);
       continue;
     }
@@ -115,7 +119,7 @@ for (const [index, product] of master_data.entries()) {
     });
 
     if (!variation) {
-      errors.push({index, sku, itemNumber, message: "No variations found for product"})
+      errors.push({ index, sku, itemNumber, message: "No variations found for product" })
       console.warn(`⚠️ Variation with item # ${itemNumber} not found in SKU ${sku} (Product ID: ${productId})`);
       continue;
     }
@@ -142,7 +146,7 @@ for (const [index, product] of master_data.entries()) {
       console.log(`Updated item number ${itemNumber}, ID ${variationId}`);
     }
     else {
-      errors.push({index, sku, itemNumber, message: "Price is zero or undefined for this product"})
+      errors.push({ index, sku, itemNumber, message: "Price is zero or undefined for this product" })
     }
   } catch (error) {
     console.error(`❌ Error for SKU ${product.Item}:`, error.response?.data || error.message);
@@ -165,11 +169,11 @@ fs.writeFileSync(DEBUG_FILE, errorHeader + csvErrors.join('\n'));
 console.log(`📝 Wrote update log to ${LOG_FILE}`);
 console.log(`✅ Updated ${updatedItems.length} items in total`);
 
-function updateProgressBar(index, total) {
+function updateProgressBar(index, total, itemNumber) {
   const progress = (index + 1) / total;
   const filled = Math.round(BAR_LENGTH * progress);
   const bar = '='.repeat(filled) + '-'.repeat(BAR_LENGTH - filled);
   const percent = (progress * 100).toFixed(1);
 
-  process.stdout.write(`\r[${bar}] ${index + 1}/${total} (${percent}%)`);
+  process.stdout.write(`\r[${bar}] ${index + 1}/${total} (${percent}%) Currently updating: ${itemNumber}`);
 }
