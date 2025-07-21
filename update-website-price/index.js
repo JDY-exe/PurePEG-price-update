@@ -68,12 +68,18 @@ for (const [index, product] of master_data.entries()) {
   const itemNumber = product["Catalog Number"];
   const sku = product.Item;
   const masterPrice = product["List Price"];
+
+  if (!itemNumber || !sku || !masterPrice) {
+    errors.push({index, sku, itemNumber, message: "Critical field missing (item #, sku, or price)"});
+    continue;
+  }
+
   updateProgressBar(index, master_data.length, itemNumber);
 
   //If item is cached
   if (itemCache[itemNumber]) {
     const { productId, variationId, price } = itemCache[itemNumber];
-    if ((!price || price != masterPrice) && masterPrice) {
+    if (!price || price != masterPrice) {
       try {
         await api.put(`products/${productId}/variations/${variationId}`, {
           regular_price: masterPrice.toFixed(2)
