@@ -124,7 +124,7 @@ for (const [index, product] of master_data.entries()) {
     });
 
     if (!variation) {
-      errors.push({ index, sku, itemNumber, message: "No variations found for product" })
+      errors.push({ index, sku, itemNumber, message: "No matching variation found for product" })
       continue;
     }
 
@@ -179,5 +179,5 @@ function updateProgressBar(index, total, itemNumber) {
   const bar = '='.repeat(filled) + '-'.repeat(BAR_LENGTH - filled);
   const percent = (progress * 100).toFixed(1);
 
-  process.stdout.write(`\r[${bar}] ${index + 1}/${total} (${percent}%) Currently updating: ${itemNumber}`);
+  process.stdout.write(`\r[${bar}] ${index + 1}/${total} (${percent}%) Currently updating: ${itemNumber}    `);
 }
