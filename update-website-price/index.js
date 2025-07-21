@@ -109,7 +109,6 @@ for (const [index, product] of master_data.entries()) {
 
     if (!productId) {
       errors.push({ index, sku, itemNumber: 0, message: "No product found for SKU" })
-      console.warn(`❌ No product found for SKU: ${sku}`);
       continue;
     }
 
@@ -126,7 +125,6 @@ for (const [index, product] of master_data.entries()) {
 
     if (!variation) {
       errors.push({ index, sku, itemNumber, message: "No variations found for product" })
-      console.warn(`⚠️ Variation with item # ${itemNumber} not found in SKU ${sku} (Product ID: ${productId})`);
       continue;
     }
 
