@@ -41,7 +41,7 @@ const { selectedFile } = await inquirer.prompt([
 
 const workbook = XLSX.readFile(path.join(rootFolder, selectedFile));
 const firstSheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-const master_data = firstSheet.splice(1, 1);
+const master_data = firstSheet.splice(0, 5);
 
 
 
@@ -115,18 +115,17 @@ for (const [index, row] of master_data.entries()) {
    */
   try {
     // Step 1: Get the main product by SKU
-    const productRes = await api.get(`products?sku=${sku}&_fields=id`);
-    let product = productRes.data[0];
-    let productId = product?.id;
+    const productRes = await api.get(`products?sku=${sku}&_fields=name,sku,id,attributes`);
+    let parentProduct = productRes.data[0];
+    let parentProductId = parentProduct?.id;
     let variation = null;
 
     //Product does not exist, create the product
-    if (!productId) {
+    if (!parentProductId) {
       try {
-        const mainProductId = await createParentProduct(row, ATTRIBUTES, api);
-        if (mainProductId) {
-          productId = mainProductId;
-        }
+        const newParent = await createParentProduct(row, ATTRIBUTES, api);
+        parentProduct = newParent;
+        parentProductId = newParent.id;
       }
       catch (error) {
         console.log(error)
@@ -134,7 +133,7 @@ for (const [index, row] of master_data.entries()) {
       }
     }
     else {
-      const variationRes = await api.get(`products/${productId}/variations?_fields=id,sku,price,attributes`, {
+      const variationRes = await api.get(`products/${parentProductId}/variations?_fields=id,sku,price,attributes`, {
         params: { per_page: 100 }
       });
 
@@ -149,10 +148,10 @@ for (const [index, row] of master_data.entries()) {
     //Variation does not exist, create the variation
     if (!variation) {
       try {
-        const variationId = await createProductVariation(row, productId, ATTRIBUTES, api);
+        const variationId = await createProductVariation(row, parentProduct, ATTRIBUTES, api);
         itemCache[itemNumber] = {
           variationId,
-          productId,
+          productId: parentProductId,
           sku,
           price: masterPrice
         }
@@ -169,17 +168,16 @@ for (const [index, row] of master_data.entries()) {
       continue;
     }
 
-    const masterPrice = product["List Price"];
     const variationId = variation.id;
 
     itemCache[itemNumber] = {
       variationId,
-      productId,
+      productId: parentProductId,
       sku,
       price: masterPrice ? masterPrice : 0
     };
     if (masterPrice) {
-      await api.put(`products/${productId}/variations/${variationId}`, {
+      await api.put(`products/${parentProductId}/variations/${variationId}`, {
         regular_price: masterPrice.toFixed(2)
       });
       updatedItems.push({
@@ -193,7 +191,7 @@ for (const [index, row] of master_data.entries()) {
       errors.push({ index, sku, itemNumber, message: "Price is zero or undefined for this product" })
     }
   } catch (error) {
-    console.error(`❌ Error for SKU ${product.Item}:`, error.response?.data || error.message);
+    console.error(`❌ Error for SKU ${row.Item}:`, error.response?.data || error);
   }
 }
 

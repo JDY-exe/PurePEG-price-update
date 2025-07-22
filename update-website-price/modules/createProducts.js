@@ -12,11 +12,11 @@ export async function createParentProduct(row, ATTRIBUTES, api) {
       required: true,
       value: row["Item_name"]
     },
-    {
-      name: "weight",
-      required: false,     //TODO: verify if weight required, assuming unit is always grams
-      value: row["Size"]
-    }
+    // {
+    //   name: "weight",
+    //   required: false,     //TODO: verify if weight required, assuming unit is always grams
+    //   value: row["Size"]
+    // }
   ]
   const productSideAttributes = [
     {
@@ -86,6 +86,7 @@ export async function createParentProduct(row, ATTRIBUTES, api) {
   ]
 
   const product = {
+    "type": "variable",
     "attributes": []
   };
   productMainAttributes.forEach((attrInArray) => {
@@ -112,23 +113,17 @@ export async function createParentProduct(row, ATTRIBUTES, api) {
     });
   })
   try {
-    console.log(JSON.stringify(product, null, 2));
     const response = await api.post('products', product);
-    const mainProductId = response.data?.id
-    return mainProductId;
+    const mainProduct = response.data;
+    return mainProduct;
   } catch (error) {
     throw error;
   }
 }
 
-export async function createProductVariation(row, mainProductId, ATTRIBUTES, api) {
+export async function createProductVariation(row, mainProduct, ATTRIBUTES, api) {
+  const mainProductId = mainProduct.id;
   const variationAttributes = [
-    {
-      name: "Purity",
-      required: true,
-      value: row["Purity"],
-      isMainAttribute: false
-    },
     {
       name: "Item #",
       required: true,
@@ -138,15 +133,22 @@ export async function createProductVariation(row, mainProductId, ATTRIBUTES, api
     {
       name: "weight",
       required: true,     //TODO: verify if weight required, assuming unit is always grams
-      value: row["Size"],
+      value: row["Size"].toString(),
       isMainAttribute: true
     },
     {
       name: "regular_price",
       required: true,
-      value: row["List Price"],
+      value: row["List Price"].toFixed(2),
       isMainAttribute: true
     }
+  ]
+  const variationMetadata = [
+    {
+      key: "_purity",
+      required: true,
+      value: row["Purity"]
+    },
   ]
   const itemNumberAttr = variationAttributes.find(attr => attr.name === "Item #");
   const itemNumber = itemNumberAttr.value;
@@ -154,7 +156,8 @@ export async function createProductVariation(row, mainProductId, ATTRIBUTES, api
     throw new Error("This product doesn't have the right item # format (SKU-VAR). It is probably not a variation");
   }
   const product = {
-    "attributes": []
+    "attributes": [],
+    "metadata": []
   };
   variationAttributes.forEach((attribute) => {
     if (attribute.required && !attribute.value) {
@@ -180,11 +183,45 @@ export async function createProductVariation(row, mainProductId, ATTRIBUTES, api
     }
   })
 
+  variationMetadata.forEach((metadata) => {
+    if (metadata.required && !metadata.value) {
+      throw new Error(`Attribute ${metadata.key} (required) is missing for this item!`);
+    }
+    if (!metadata.required && !metadata.value) {
+      if (metadata.fallbackValue) {
+        metadata.value = metadata.fallbackValue;
+      }
+      else {
+        metadata.value = "N/A"; 
+      }
+    }
+    product.metadata.push({
+      "key": metadata.key,
+      "value": metadata.value.toString()
+    })
+  })
   try {
-    const response = api.post(`products/${mainProductId}/variations`);
+    let mainProductAttributes = mainProduct.attributes;
+    const itemNumberAttributeIndex = mainProductAttributes.findIndex((attr) => attr.name == "Item #");
+    if (itemNumberAttributeIndex == -1) {
+      mainProductAttributes.push({
+        "id": ATTRIBUTES.find(element => element.name == "Item #").id,
+        "options": [itemNumber],
+        "variation": true
+      })
+    } else {
+      mainProductAttributes[itemNumberAttributeIndex].options.push(itemNumber);
+    }
+    await api.put(`products/${mainProductId}`, {
+      "attributes": mainProductAttributes
+    })
+    const response = await api.post(`products/${mainProductId}/variations`, 
+      product
+    );
     const variationProductId = response.data?.id;
     return variationProductId;
   } catch(error) {
+    console.log(error);
     throw new Error("Unable to create variation " + error.message);
   }
 }
