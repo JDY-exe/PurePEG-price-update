@@ -74,10 +74,8 @@ async function main() {
           const variationId = cachedVariation.variationId;
 
           let fieldsUpdated = [];
-
           // --- Parent Product Update ---
           const parentUpdatePayload = {};
-
 
 
           // Compare master fields
@@ -327,7 +325,6 @@ async function main() {
         errors.push({ index, sku, itemNumber, message: errorMessage });
       }
     }
-
     // --- Finalize ---
     writeCache(CACHE_FILE, itemCache);
     writeUpdatedProductsLog(LOG_FILE, updatedItems);
@@ -337,7 +334,6 @@ async function main() {
     if (updatedItems.length > 0) console.log(`✅ ${updatedItems.length} items were created or updated.`);
     if (errors.length > 0) console.log(`Encountered ${errors.length} errors. Check ${DEBUG_FILE} for details.`);
 
-
   } catch (error) {
     console.error(`\n\nA critical error occurred: ${error.message}`);
     process.exit(1);
@@ -345,3 +341,4 @@ async function main() {
 }
 
 main();
+
