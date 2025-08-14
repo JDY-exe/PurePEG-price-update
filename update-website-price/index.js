@@ -1,472 +1,347 @@
 import fs from 'fs';
 import path from 'path';
-import inquirer from 'inquirer';
-import XLSX from 'xlsx';
-import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
-import dotenv from 'dotenv';
-import { fileURLToPath, urlToHttpOptions } from 'url';
-import { writeCache, writeUpdatedProductsLog, writeErrorsLog } from './meta/modules/writeLogs.js';
-import { createParentProduct, createProductVariation } from './meta/modules/createProducts.js';
+import { fileURLToPath } from 'url';
+import { api, ATTRIBUTES } from './lib/api.js';
+import { selectExcelFile, readExcelData, loadCache, writeCache, writeUpdatedProductsLog, writeErrorsLog } from './lib/file-handler.js';
+import { mapRowToProductData } from './lib/product-mapper.js';
+import { createParentProduct, createProductVariation, processCategories, splitEscapedString } from './lib/product-service.js';
+import { updateProgressBar } from './lib/utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.join(__dirname, '.env') });
 
-console.clear();
-// Root folder is passed in as argument
-const rootFolder = process.argv[2];
-if (!rootFolder) {
-  console.error("❌ Please pass the working folder path.");
-  process.exit(1);
-}
-
-const META_DIR = path.join(__dirname, 'meta');
-fs.mkdirSync(META_DIR, { recursive: true });
-
-// Step 1: Prompt for Excel file
-const files = fs.readdirSync(rootFolder).filter(f => (f.endsWith('.xlsm') || f.endsWith('.xlsx')));
-if (files.length === 0) {
-  console.error('❌ No .xlsm files found in folder:', rootFolder);
-  process.exit(1);
-}
-
-const { selectedFile } = await inquirer.prompt([
-  {
-    type: 'list',
-    name: 'selectedFile',
-    message: '📂 Select the Excel file to process:\nNote: First sheet in excel file has to be the master database\n\n',
-    choices: files
-  }
-]);
-
-const workbook = XLSX.readFile(path.join(rootFolder, selectedFile));
-const firstSheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-const master_data = firstSheet.splice(0, 2);
-
-const api = new WooCommerceRestApi.default({
-  url: process.env.WC_API_URL,
-  consumerKey: process.env.WC_KEY,
-  consumerSecret: process.env.WC_SECRET,
-  version: 'wc/v3'
-});
-
-const CACHE_FILE = path.join(META_DIR, 'new_cache.json');
-const LOG_FILE = path.join(META_DIR, 'price_update_log.csv');
-const DEBUG_FILE = path.join(META_DIR, 'debug.csv');
-const BAR_LENGTH = 40;
+// Master switch to prevent accidental API calls during testing
 const UPDATE_WEBSITE_DATA = true;
 
-let ATTRIBUTES;
-try {
-  const response = await api.get('products/attributes');
-  ATTRIBUTES = response.data;
-} catch (error) {
-  console.log(error.message);
-}
-
-let itemCache = {};
-if (fs.existsSync(CACHE_FILE)) {
-  itemCache = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8'));
-  console.log(`⚡ Loaded ${Object.keys(itemCache).length} cached item(s)`);
-}
-
-const updatedItems = [];
-const errors = [];
-
-for (const [index, row] of master_data.entries()) {
-  const itemNumber = row["Item #"];
-  const sku = row["SKU"];
-  const masterAttributes = [
-    { name: "Full Name", value: row["Full Name"], isVisible: true, required: true, position: 1 },
-    { name: "Synonyms", value: row["Synonyms"], isVisible: true, required: true, position: 2 },
-    { name: "CAS Number", value: row["CAS Number"], isVisible: true, required: true, position: 3 },
-    { name: "Molecular Formula", value: row["Molecular Formula"], isVisible: true, required: true, position: 4 },
-    { name: "Molecular Weight", value: row["Molecular Weight"], isVisible: true, required: true, position: 5 },
-    { name: "Appearance", value: row["Appearance"], isVisible: true, required: true, position: 6 },
-    { name: "Storage", value: row["Storage"], isVisible: true, required: true, position: 7 },
-    { name: "SMILES", value: row["SMILES"], required: true, isVisible: true, position: 8 },
-    { name: "Functional Group", value: row["Functional Group"], required: false, isVisible: false, position: 9 },
-    { name: "PEG-Length", value: row["PEG length"], required: false, isVisible: false, position: 10 },
-    { name: "Functional Group Prefix", value: row["Functional Group Prefix"], required: false, isVisible: false, position: 11 }
-  ];
-  const masterFields = [
-    { name: "name", required: true, value: row["Name"] }
-  ];
-  const masterCategories = [
-    row["Categories"]
-  ];
-  const variationFields = [
-    { name: "regular_price", value: row["List Price"], required: true, callBackFn: (val) => val.toFixed(2) },
-    { name: "weight", value: row["Weight (g)"], required: true, callBackFn: (val) => val.toString() }
-  ];
-  const variationMetaData = [
-    { key: "_purity", required: true, value: row["Purity"] }
-  ];
-
-
-  updateProgressBar(index, master_data.length, itemNumber);
-
-  /* ===
-   * If product does exist in the cache, try to update
-   * ===
-   */
-  if (itemCache[sku] && itemCache[sku].variations && itemCache[sku].variations[itemNumber]) {
-    try {
-      const cachedItem = itemCache[sku];
-      const cachedAttributes = itemCache[sku].attributes;
-      const cachedVariation = itemCache[sku].variations[itemNumber];
-      const parentId = cachedItem.parentId;
-      const variationId = cachedVariation.variationId;
-
-      let fieldsUpdated = [];
-      const parentUpdatePayload = {};
-      const parentUpdateActions = [];
-
-      // 1. Check for attribute changes and prepare them for the payload
-      const attributesChanged = masterAttributes.filter((attrInMasterSheet) => (cachedAttributes[attrInMasterSheet.name] != attrInMasterSheet.value));
-      if (attributesChanged.length > 0) {
-        let formerAttributes = [];
-        if (UPDATE_WEBSITE_DATA) {
-          try {
-            const productRes = await api.get(`products?sku=${sku}&_fields=attributes`);
-            formerAttributes = productRes.data[0].attributes;
-          } catch (error) {
-            throw new Error("Could not get parent item attributes from API for comparison");
-          }
-        }
-
-        attributesChanged.forEach((attrInMasterSheet) => {
-          const indexOfAttribute = formerAttributes.findIndex(attr => attr.name === attrInMasterSheet.name);
-          if (indexOfAttribute === -1) {
-            const attributeReference = ATTRIBUTES.find(attr => attrInMasterSheet.name === attr.name);
-            if (!attributeReference) throw new Error(`Could not find attribute reference named ${attrInMasterSheet.name}`);
-            formerAttributes.push({
-              id: attributeReference.id,
-              visible: attrInMasterSheet.isVisible,
-              options: [attrInMasterSheet.value ? attrInMasterSheet.value.toString() : "N/A"],
-              position: attrInMasterSheet.position ?? 0,
-            });
-          } else {
-            formerAttributes[indexOfAttribute].options = [attrInMasterSheet.value ? attrInMasterSheet.value.toString() : "N/A"];
-          }
-          fieldsUpdated.push({ field: attrInMasterSheet.name, newValue: attrInMasterSheet.value ?? "N/A" });
-        });
-
-        parentUpdatePayload.attributes = formerAttributes;
-        parentUpdateActions.push("attributes");
-      }
-
-      // 2. Check for parent field changes and add them to the payload
-      const parentFieldsChanged = masterFields.filter((fieldInMasterSheet) => cachedItem[fieldInMasterSheet.name] != fieldInMasterSheet.value);
-      if (parentFieldsChanged.length > 0) {
-        parentFieldsChanged.forEach((field) => {
-          if (field.required && !field.value) throw new Error(`Field ${field.name} is required`);
-          parentUpdatePayload[field.name] = field.value;
-          fieldsUpdated.push({ field: field.name, newValue: field.value ?? "N/A" });
-        });
-        parentUpdateActions.push("fields");
-      }
-
-      // 3. Check for category changes and prepare them for the payload
-      const categoriesChanged = !arraysHaveSameElements(cachedItem.categories ?? [], masterCategories);
-      if (categoriesChanged) {
-        try {
-          const categoryFetchPromises = masterCategories.map(category =>
-            api.get(`products/categories/?search=${encodeURIComponent(category)}`).then((resp) => {
-              if (!resp.data || resp.data.length === 0) throw new Error(`Category ${category} not found`);
-              return { id: resp.data[0].id, name: resp.data[0].name };
-            })
-          );
-          const categoryData = await Promise.all(categoryFetchPromises);
-          parentUpdatePayload.categories = categoryData;
-          parentUpdateActions.push("categories");
-          fieldsUpdated.push({ field: "Categories", newValue: masterCategories });
-        } catch (error) {
-          throw new Error(`Failed to prepare categories for update: ${error.message}`);
-        }
-      }
-
-      // 4. If any parent data has changed, send ONE API call and then update cache on success
-      if (Object.keys(parentUpdatePayload).length > 0) {
-        if (UPDATE_WEBSITE_DATA) {
-          try {
-            await api.put(`products/${parentId}`, parentUpdatePayload);
-          } catch (error) {
-            throw new Error(`Could not update parent product (updating: ${parentUpdateActions.join(", ")}). API Error: ${error.message}`);
-          }
-        }
-        
-        // --- On success, update the cache verbosely ---
-        if (attributesChanged.length > 0) {
-          attributesChanged.forEach((attr) => {
-            itemCache[sku].attributes[attr.name] = attr.value;
-          });
-        }
-        if (parentFieldsChanged.length > 0) {
-          parentFieldsChanged.forEach((field) => {
-            itemCache[sku][field.name] = field.value;
-          });
-        }
-        if (categoriesChanged) {
-          itemCache[sku].categories = masterCategories;
-        }
-      }
-      
-      // --- Consolidated Variation Update ---
-      const variationUpdatePayload = {};
-      const variationUpdateActions = [];
-
-      // 5. Check for variation field changes and add to payload
-      const variationFieldsChanged = variationFields.filter((field) => cachedVariation[field.name] != field.value);
-      if (variationFieldsChanged.length > 0) {
-        variationFieldsChanged.forEach((field) => {
-            variationUpdatePayload[field.name] = field.callBackFn ? field.callBackFn(field.value) : field.value;
-            fieldsUpdated.push({ field: field.name, newValue: field.value ?? "N/A" });
-        });
-        variationUpdateActions.push("fields");
-      }
-
-      // 6. Check for variation metadata changes and add to payload
-      const variationMetaChanged = variationMetaData.filter((data) => cachedVariation[data.key] != data.value);
-      if (variationMetaChanged.length > 0) {
-          variationUpdatePayload.meta_data = []; // Initialize if not present
-          variationMetaChanged.forEach((meta) => {
-              variationUpdatePayload.meta_data.push({ key: meta.key, value: meta.value ? meta.value.toString() : "N/A" });
-              fieldsUpdated.push({ field: meta.key, newValue: meta.value ?? "N/A" });
-          });
-          variationUpdateActions.push("metadata");
-      }
-      
-      // 7. If any variation data has changed, send ONE API call and then update cache
-      if (Object.keys(variationUpdatePayload).length > 0) {
-        if (UPDATE_WEBSITE_DATA) {
-          try {
-            await api.put(`products/${parentId}/variations/${variationId}`, variationUpdatePayload);
-          } catch (error) {
-            throw new Error(`Could not update variation (updating: ${variationUpdateActions.join(", ")}). API Error: ${error.message}`);
-          }
-        }
-        
-        // --- On success, update the cache for both fields and metadata ---
-        if (variationFieldsChanged.length > 0) {
-            variationFieldsChanged.forEach(field => {
-                itemCache[sku].variations[itemNumber][field.name] = field.value;
-            });
-        }
-        if (variationMetaChanged.length > 0) {
-            variationMetaChanged.forEach((meta) => {
-                itemCache[sku].variations[itemNumber][meta.key] = meta.value;
-            });
-        }
-      }
-
-      if (fieldsUpdated.length > 0) {
-        updatedItems.push({ itemNumber, variationId, sku, fields: fieldsUpdated.map(obj => obj.field).join(" / ") })
-      }
-      continue;
-
-    } catch (error) {
-      errors.push({ index, sku, itemNumber, message: `Failed to update cached item: ${error.message}` });
-      continue;
-    }
+async function main() {
+  console.clear();
+  const rootFolder = process.argv[2];
+  if (!rootFolder) {
+    console.error("❌ Please provide the working folder path as an argument.");
+    process.exit(1);
   }
 
+  const META_DIR = path.join(__dirname, 'meta');
+  fs.mkdirSync(META_DIR, { recursive: true });
+
+  // Define file paths
+  const CACHE_FILE = path.join(META_DIR, 'product_cache.json');
+  const LOG_FILE = path.join(META_DIR, 'update_log.csv');
+  const DEBUG_FILE = path.join(META_DIR, 'debug_log.csv');
+
+  try {
+    const excelFilePath = await selectExcelFile(rootFolder);
+    const masterData = readExcelData(excelFilePath);
+    let itemCache = loadCache(CACHE_FILE);
+    const updatedItems = [];
+    const errors = [];
 
 
-  /* ==========
-   * If Main Product does not exist in the cache, try to update
-   * ==========
-   */
-  let parentProductId = 0;
-  let variationId = 0;
-  let parent = null
-  let variation = null;
-  updatedItems.push({
-    itemNumber, variationId: 0, sku, fields: "All fields (cache miss)"
-  })
+    console.log(`\nStarting product processing for ${masterData.length} items...`);
 
-  if (!itemCache[sku]) {
-    try {
+    // --- Main Processing Loop ---
+    for (const [index, row] of masterData.entries()) {
+      const productData = mapRowToProductData(row);
+      const { sku, itemNumber, master, variation } = productData;
+      updateProgressBar(index, masterData.length, itemNumber);
+
       try {
-        const productRes = await api.get(`products?sku=${sku}`);
-        parent = productRes.data[0];
-        parentProductId = parent?.id;
-      } catch (error) {
-        throw new Error(`Failed to get main item from API: ${error.message}`);
-      }
-      if (!parentProductId) {
-        const { cacheItem, parentProduct } = await createParentProduct(row, ATTRIBUTES, api);
-        itemCache[sku] = cacheItem;
-        parentProductId = cacheItem.parentId;
-        parent = parentProduct;
-      }
-      else {
-        const updatedData = {};
-
-        //Main fields
-        masterFields.forEach((field) => {
+        for (const field of master.fields) {
           if (field.required && !field.value) {
-            throw new Error(`Field ${field.name} is required`);
+            throw new Error(`Required parent field "${field.name}" is missing for update.`);
           }
-          updatedData[field.name] = field.value.toString();
-        })
-
-        //Attributes
-        let formerAttributes = [];
-        try {
-          const productRes = await api.get(`products?sku=${sku}&_fields=name,sku,id,attributes`);
-          formerAttributes = productRes.data[0].attributes;
-        } catch (error) {
-          throw new Error("Could not get parent item attributes from API");
         }
-        masterAttributes.forEach((attrInMasterSheet) => {
-          const indexOfAttribute = formerAttributes.indexOf(attr => attrInMasterSheet.name == attr.name);
-          if (indexOfAttribute == -1) {
-            const attributeReference = ATTRIBUTES.find(attr => attrInMasterSheet.name == attr.name);
-            if (!attributeReference) {
-              throw new Error(`Could not find attribute named ${attrInMasterSheet.name}`)
+        for (const field of variation.fields) {
+          if (field.required && !field.value) {
+            throw new Error(`Required variation field "${field.name}" is missing for update.`);
+          }
+        }
+        for (const meta of variation.meta_data) {
+          if (meta.required && !meta.value) {
+            throw new Error(`Required variation metadata "${meta.key}" is missing for update.`);
+          }
+        }
+        if (variation.attribute.required && !variation.attribute.value) {
+          throw new Error(`Required variation attribute "${variation.attribute.name}" is missing.`);
+        }
+        //================================================
+        // 1. Handle Cached Product (Update Logic)
+        //================================================
+        if (itemCache[sku] && itemCache[sku].variations && itemCache[sku].variations[itemNumber]) {
+          const cachedItem = itemCache[sku];
+          const cachedVariation = itemCache[sku].variations[itemNumber];
+          const parentId = cachedItem.parentId;
+          const variationId = cachedVariation.variationId;
+
+          let fieldsUpdated = [];
+
+          // --- Parent Product Update ---
+          const parentUpdatePayload = {};
+
+
+
+          // Compare master fields
+          master.fields.forEach(field => {
+            if (cachedItem[field.name] != field.value) {
+              parentUpdatePayload[field.name] = field.value;
+              fieldsUpdated.push({ field: field.name, newValue: field.value });
             }
-            formerAttributes.push({
-              id: attributeReference.id,
-              visible: attrInMasterSheet.isVisible,
-              options: [attrInMasterSheet.value ? attrInMasterSheet.value.toString() : "N/A"],
-              position: attrInMasterSheet.position ?? 0
-            })
+          });
+
+          // Compare attributes
+          const changedAttributes = master.attributes.filter(attr => cachedItem.attributes[attr.name] != attr.value);
+
+          // Proceed only if there are actual changes
+          if (changedAttributes.length > 0) {
+            changedAttributes.forEach(attr => {
+              fieldsUpdated.push({ field: `Attribute: ${attr.name}`, newValue: attr.value ?? "N/A" });
+            });
+
+            const { data: remoteProduct } = await api.get(`products/${parentId}`, { _fields: 'attributes' });
+            let remoteAttributes = remoteProduct.attributes;
+
+            master.attributes.forEach(attr => {
+              const remoteAttrIndex = remoteAttributes.findIndex(ra => ra.id === ATTRIBUTES.find(a => a.name === attr.name)?.id);
+              const optionValue = attr.value ? splitEscapedString(attr.value.toString()) : ["N/A"];
+
+              if (remoteAttrIndex !== -1) {
+                // Update an existing attribute
+                remoteAttributes[remoteAttrIndex].options = optionValue;
+              } else {
+                // Add a new attribute that wasn't on the product before
+                const attrRef = ATTRIBUTES.find(a => a.name === attr.name);
+                if (attrRef) {
+                  remoteAttributes.push({
+                    id: attrRef.id,
+                    name: attr.name,
+                    visible: attr.isVisible ?? true,
+                    variation: attr.isVariation ?? false,
+                    position: attr.position ?? 0,
+                    options: optionValue
+                  });
+                }
+              }
+            });
+
+            // 4. Add the complete, updated attribute array to the payload
+            parentUpdatePayload.attributes = remoteAttributes;
+          }
+
+
+          const categoriesChanged = cachedItem.categories !== master.categories;
+          if (categoriesChanged) {
+
+            const categoryPayload = await processCategories(master.categories, api);
+            parentUpdatePayload.categories = categoryPayload;
+            fieldsUpdated.push({ field: 'Categories', newValue: master.categories });
+          }
+
+
+          if (Object.keys(parentUpdatePayload).length > 0) {
+            if (UPDATE_WEBSITE_DATA) {
+              await api.put(`products/${parentId}`, parentUpdatePayload);
+            }
+            // Update cache on success
+            if (parentUpdatePayload.name) itemCache[sku].name = parentUpdatePayload.name;
+            if (changedAttributes.length > 0) {
+              master.attributes.forEach(attr => itemCache[sku].attributes[attr.name] = attr.value);
+            }
+          }
+
+
+
+
+          // --- Variation Product Update ---
+          const variationUpdatePayload = {};
+          variation.fields.forEach(field => {
+            if (cachedVariation[field.name] != field.value) {
+              variationUpdatePayload[field.name] = field.callBackFn ? field.callBackFn(field.value) : field.value;
+              fieldsUpdated.push({ field: field.name, newValue: field.value });
+            }
+          });
+
+          const metaDataChanged = variation.meta_data.some(meta => cachedVariation[meta.key] != meta.value);
+          if (metaDataChanged) {
+            variationUpdatePayload.meta_data = variation.meta_data.map(meta => ({
+              key: meta.key,
+              value: meta.callBackFn ? meta.callBackFn(meta.value) : meta.value.toString()
+            }));
+            fieldsUpdated.push({ field: 'Meta Data', newValue: 'Updated' });
+          }
+
+          if (Object.keys(variationUpdatePayload).length > 0) {
+            if (UPDATE_WEBSITE_DATA) {
+              await api.put(`products/${parentId}/variations/${variationId}`, variationUpdatePayload);
+            }
+            // Update cache on success
+            variation.fields.forEach(field => itemCache[sku].variations[itemNumber][field.name] = field.value);
+            variation.meta_data.forEach(meta => itemCache[sku].variations[itemNumber][meta.key] = meta.value);
+          }
+
+          if (fieldsUpdated.length > 0) {
+            updatedItems.push({ itemNumber, sku, variationId, fields: fieldsUpdated.map(f => f.field).join(' / ') });
+          }
+          continue; // Move to next item
+        }
+
+        //================================================
+        // 2. Handle New Product (Creation Logic)
+        //================================================
+        let parentProduct;
+
+        if (!itemCache[sku]) {
+
+          const { data: existingProducts } = await api.get('products', { sku });
+
+          if (existingProducts.length > 0) {
+            parentProduct = existingProducts[0];
+
+            let remoteAttributes = parentProduct.attributes;
+
+            const parentUpdatePayload = {
+              name: master.fields.find(f => f.name === 'name').value,
+              categories: await processCategories(master.categories, api)
+            };
+
+            master.attributes.forEach(attrFromSheet => {
+              const remoteAttrIndex = remoteAttributes.findIndex(ra => ra.name === attrFromSheet.name);
+              const optionValue = attrFromSheet.value ? splitEscapedString(attrFromSheet.value.toString()) : ["N/A"];
+
+              if (remoteAttrIndex !== -1) {
+                remoteAttributes[remoteAttrIndex].options = optionValue;
+              } else {
+                const attrRef = ATTRIBUTES.find(a => a.name === attrFromSheet.name);
+                if (attrRef) {
+                  remoteAttributes.push({
+                    id: attrRef.id,
+                    name: attrFromSheet.name,
+                    visible: attrFromSheet.isVisible ?? true,
+                    variation: attrFromSheet.isVariation ?? false,
+                    position: attrFromSheet.position ?? 0,
+                    options: optionValue
+                  });
+                }
+              }
+            });
+
+            parentUpdatePayload.attributes = remoteAttributes;
+
+            if (UPDATE_WEBSITE_DATA) {
+              await api.put(`products/${parentProduct.id}`, parentUpdatePayload);
+            }
+
+            itemCache[sku] = {
+              parentId: parentProduct.id,
+              name: master.fields.find(f => f.name === 'name').value,
+              sku: sku,
+              categories: master.categories,
+              attributes: master.attributes.reduce((acc, attr) => ({ ...acc, [attr.name]: attr.value }), {}),
+              variations: {}
+            };
+
+            updatedItems.push({ itemNumber, sku, variationId: 'N/A', fields: 'Parent Adopted & Synced from Sheet' });
           }
           else {
-            formerAttributes[indexOfAttribute].options = [attrInMasterSheet.value ? attrInMasterSheet.value.toString() : "N/A"]
-            formerAttributes[indexOfAttribute].position = attrInMasterSheet.position ?? null
+            // The product does not exist on the site, so we create it
+            if (UPDATE_WEBSITE_DATA) {
+              const { newProduct, cacheItem } = await createParentProduct(productData, ATTRIBUTES, api);
+              parentProduct = newProduct;
+              itemCache[sku] = cacheItem;
+              updatedItems.push({ itemNumber, sku, variationId: 'N/A', fields: 'New Parent Created' });
+            } else {
+              errors.push({ index, sku, itemNumber, message: 'Dry Run: Parent would be created.' });
+              continue;
+            }
           }
-        })
-        updatedData.attributes = formerAttributes;
-
-        //update the parent item
-        if (UPDATE_WEBSITE_DATA) {
-          try {
-            await api.put(`products/${parentProductId}/`, updatedData);
-          } catch (error) {
-            throw new Error(`Could not update parent attributes from API ${error.message}`);
-          }
+        } else {
+          // Parent is in cache, so we just need its full data for the variation step.
+          const { data: fullParentProduct } = await api.get(`products/${itemCache[sku].parentId}`);
+          parentProduct = fullParentProduct;
         }
 
-        //update the cache
-        updatedData.attributes = {};
-        masterAttributes.forEach((attrInMasterSheet) => {
-          updatedData.attributes[attrInMasterSheet.name] = attrInMasterSheet.value;
-        })
-        itemCache[sku] = updatedData;
-        itemCache[sku].variations = {};
-        itemCache[sku].parentId = parentProductId;
-      }
-    }
-    catch (error) {
-      console.log(error);
-      errors.push({ index, sku, itemNumber, message: `Failed to update parent item that is not cached: ${error.message}` })
-      continue;
-    }
-  } else {
-    try {
-      const productRes = await api.get(`products?sku=${sku}`);
-      parent = productRes.data[0];
-      parentProductId = parent?.id;
-    } catch (error) {
-      throw new Error(`Failed to get main item from API: ${error.message}`);
-    }
-  }
 
-  /* ==========
-   * If Variation Product does not exist in the cache, try to update
-   * ==========
-   */
-  if (!itemCache[sku].variations || !itemCache[sku].variations[itemNumber]) {
-    try {
-      try {
-        const variationRes = await api.get(`products/${parentProductId}/variations`, {
-          params: { per_page: 100 }
-        });
-        variation = variationRes.data.find(variation => {
-          return variation.attributes.some(attr =>
-            attr.name.toLowerCase() == 'item #' &&
-            attr.option == itemNumber
+        //================================================
+        // 3. Handle New Variation (Creation Logic)
+        //================================================
+        if (!itemCache[sku].variations[itemNumber]) {
+
+
+          const { data: remoteVariations } = await api.get(`products/${parentProduct.id}/variations`, { per_page: 100 });
+          const existingVariation = remoteVariations.find(v =>
+            v.attributes.some(attr => attr.name === 'Item #' && attr.option === itemNumber)
           );
-        });
+
+          if (existingVariation) {
+            const updatePayload = {
+              meta_data: []
+            };
+
+            variation.fields.forEach(field => {
+              updatePayload[field.name] = field.callBackFn ? field.callBackFn(field.value) : field.value;
+            });
+
+            variation.meta_data.forEach(meta => {
+              updatePayload.meta_data.push({
+                key: meta.key,
+                value: meta.callBackFn ? meta.callBackFn(meta.value) : meta.value.toString()
+              });
+            });
+            if (UPDATE_WEBSITE_DATA) {
+              await api.put(`products/${parentProduct.id}/variations/${existingVariation.id}`, updatePayload);
+            }
+
+            const variationCacheItem = {
+              variationId: existingVariation.id
+            };
+
+            variation.fields.forEach(field => {
+              variationCacheItem[field.name] = field.value;
+            });
+            variation.meta_data.forEach(meta => {
+              variationCacheItem[meta.key] = meta.value;
+            });
+
+            // --- Save the up-to-date information to the local cache and log the action ---
+            itemCache[sku].variations[itemNumber] = variationCacheItem;
+            updatedItems.push({
+              itemNumber,
+              sku,
+              variationId: existingVariation.id,
+              fields: 'Variation Adopted & Synced from Sheet' // More descriptive log message
+            });
+
+          } else {
+            // 4. If not found, it's safe to create a new one.
+            if (UPDATE_WEBSITE_DATA) {
+              const newVariationCacheItem = await createProductVariation(productData, parentProduct, ATTRIBUTES, api);
+              itemCache[sku].variations[itemNumber] = newVariationCacheItem;
+              updatedItems.push({ itemNumber, sku, variationId: newVariationCacheItem.variationId, fields: 'New Variation Created' });
+            }
+            else {
+              errors.push({ index, sku, itemNumber, message: 'Dry Run: Variation would be created.' });
+            }
+          }
+        }
       } catch (error) {
-        throw new Error(`Failed to get variation from API: ${error.message}`);
+        const errorMessage = error.response?.data?.message || error.message;
+        errors.push({ index, sku, itemNumber, message: errorMessage });
       }
-
-      if (!variation) {
-        const cacheItem = await createProductVariation(row, parent, ATTRIBUTES, api);
-        variationId = cacheItem.variationId;
-        itemCache[sku].variations[itemNumber] = cacheItem;
-        continue;
-      }
-
-      variationId = variation.id;
-
-      const updatedData = {
-        metadata: []
-      };
-      const cacheItem = {
-        variationId: variationId
-      };
-      variationFields.forEach((field) => {
-        if (field.required && !field.value) {
-          throw new Error(`Field ${field.name} is required`);
-        }
-        updatedData[field.name] = field.callBackFn ? field.callBackFn(field.value) : field.value.toString();
-        cacheItem[field.name] = field.value;
-      })
-
-      variationMetaData.forEach((data) => {
-        if (data.required && !data.value) {
-          throw new Error(`Field ${data.name} is required`);
-        }
-        updatedData.metadata.push({
-          key: data.key,
-          value: data.value.toString()
-        })
-        cacheItem[data.key] = data.value;
-      })
-      if (UPDATE_WEBSITE_DATA) {
-        try {
-          await api.put(`products/${parentProductId}/variations/${variationId}`, updatedData);
-        } catch (error) {
-          throw new Error(`Failed to update API endpoint: ${error.message}`)
-        }
-      }
-      if (!itemCache[sku].variations) {
-        itemCache[sku].variations = {};
-      }
-      itemCache[sku].variations[itemNumber] = cacheItem;
-
-    } catch (error) {
-      console.log(error)
-      errors.push({
-        index, sku, itemNumber, message: `Failed to update variation item that is not cached: ${error.message}`
-      })
     }
+
+    // --- Finalize ---
+    writeCache(CACHE_FILE, itemCache);
+    writeUpdatedProductsLog(LOG_FILE, updatedItems);
+    writeErrorsLog(DEBUG_FILE, errors);
+
+    console.log('\n\nProcess complete.');
+    if (updatedItems.length > 0) console.log(`✅ ${updatedItems.length} items were created or updated.`);
+    if (errors.length > 0) console.log(`Encountered ${errors.length} errors. Check ${DEBUG_FILE} for details.`);
+
+
+  } catch (error) {
+    console.error(`\n\nA critical error occurred: ${error.message}`);
+    process.exit(1);
   }
 }
 
-writeCache(CACHE_FILE, itemCache);
-writeUpdatedProductsLog(LOG_FILE, updatedItems);
-writeErrorsLog(DEBUG_FILE, errors);
-
-function updateProgressBar(index, total, itemNumber) {
-  const progress = (index + 1) / total;
-  const filled = Math.round(BAR_LENGTH * progress);
-  const bar = '='.repeat(filled) + '-'.repeat(BAR_LENGTH - filled);
-  const percent = (progress * 100).toFixed(1);
-
-  process.stdout.write(`\r[${bar}] ${index + 1}/${total} (${percent}%) Currently updating: ${itemNumber}`);
-}
-
-function debug(index, message) {
-  const row = master_data[index];
-  console.log(`\n i: ${index} item: ${row['Item #']} sku: ${row['SKU']} | ${message}`);
-}
-
-function arraysHaveSameElements(a, b) {
-  if (a.length !== b.length) return false;
-  return [...a].sort().every((val, i) => val === [...b].sort()[i]);
-}
+main();
