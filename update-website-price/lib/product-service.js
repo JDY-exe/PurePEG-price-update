@@ -2,18 +2,25 @@
 export async function processCategories(rawCategories, api) {
   if (!rawCategories) return [];
   const categoryNames = new Set(
-    rawCategories.split(',')
+    rawCategories
+      .split(',')
       .map(c => c.split('>').pop().trim())
       .filter(Boolean)
   );
 
   const fetchPromises = Array.from(categoryNames).map(name =>
     api.get('products/categories', { search: name })
-      .then(res => res.data.length > 0 ? { id: res.data[0].id } : null)
+      .then(res => {
+        const matchingCategory = res.data.find(
+          category => category.name.toLowerCase() === name.toLowerCase()
+        );
+        return matchingCategory ? { id: matchingCategory.id } : null;
+      })
       .catch(() => null)
   );
 
-  return (await Promise.all(fetchPromises)).filter(Boolean);
+  const settledPromises = await Promise.all(fetchPromises);
+  return settledPromises.filter(Boolean);
 }
 
 // Helper to format attributes for an API payload
@@ -127,10 +134,20 @@ export async function createProductVariation(productData, parentProduct, allAttr
   const attrForVariation = parentAttributes.find(a => a.name === variationAttrDef.name);
 
   if (!attrForVariation) {
-    throw new Error(`Parent product (SKU: ${parentProduct.sku}) is missing the "${variationAttrDef.name}" attribute.`);
-  }
+  const newAttribute = {
+    id: allAttributesRef.find(attr => attr.name == variationAttrDef.name).id,
+    name: variationAttrDef.name,
+    options: [],
+    position: variationAttrDef.position,
+    visible: false,
+    variation: true
+  };
+
+  parentAttributes.push(newAttribute);
+  attrForVariation = newAttribute;
+}
   const newOptionValue = variationAttrDef.value.toString();
-  
+
   if (!attrForVariation.options.includes(newOptionValue)) {
     attrForVariation.options.push(newOptionValue);
     attrForVariation.variation = true;

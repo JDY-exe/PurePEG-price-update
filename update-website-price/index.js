@@ -332,7 +332,7 @@ async function main() {
 
     console.log('\n\nProcess complete.');
     if (updatedItems.length > 0) console.log(`✅ ${updatedItems.length} items were created or updated.`);
-    if (errors.length > 0) console.log(`Encountered ${errors.length} errors. Check ${DEBUG_FILE} for details.`);
+    if (errors.length > 0) console.log(`Encountered ${errors.length} errors. Check ${DEBUG_FILE} for details.\n`);
 
   } catch (error) {
     console.error(`\n\nA critical error occurred: ${error.message}`);
