@@ -144,6 +144,9 @@ async function main() {
             if (changedAttributes.length > 0) {
               master.attributes.forEach(attr => itemCache[sku].attributes[attr.name] = attr.value);
             }
+            if (categoriesChanged) {
+              itemCache[sku].categories = master.categories;
+            }
           }
 
 
