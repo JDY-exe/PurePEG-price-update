@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "fs": "^0.0.1-security",
+    "inquirer": "^12.9.3",
+    "path": "^0.12.7",
+    "xlsx": "^0.18.5"
+  }
+}
