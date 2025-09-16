@@ -1,8 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import xlsx from 'xlsx';
 import { api, ATTRIBUTES } from './lib/api.js';
-import { selectExcelFile, readExcelData, loadCache, writeCache, writeUpdatedProductsLog, writeErrorsLog } from './lib/file-handler.js';
+import { selectExcelFile, readExcelWorkbook, loadCache, writeCache, writeUpdatedProductsLog, writeErrorsLog, writeUpdatedWorkbook } from './lib/file-handler.js';
 import { mapRowToProductData } from './lib/product-mapper.js';
 import { createParentProduct, createProductVariation, processCategories, splitEscapedString } from './lib/product-service.js';
 import { updateProgressBar } from './lib/utils.js';
@@ -31,10 +32,22 @@ async function main() {
 
   try {
     const excelFilePath = await selectExcelFile(rootFolder);
-    const masterData = readExcelData(excelFilePath);
+    const outputFilePath = excelFilePath.replace('.xlsm', '_temp.xlsm');
+
+    const { workbook, worksheet, data: masterData } = readExcelWorkbook(excelFilePath);
     let itemCache = loadCache(CACHE_FILE);
+
     const updatedItems = [];
     const errors = [];
+
+    let urlColumnIndex = -1;
+    if (masterData.length > 0) {
+      const headers = Object.keys(masterData[0]);
+      urlColumnIndex = headers.indexOf('Product URL');
+    }
+    if (urlColumnIndex === -1) {
+      console.warn('⚠️ Warning: "Product URL" column not found in the Excel sheet. Permalinks will not be saved.');
+    }
 
 
     console.log(`\nStarting product processing for ${masterData.length} items...`);
@@ -43,6 +56,7 @@ async function main() {
     for (const [index, row] of masterData.entries()) {
       const productData = mapRowToProductData(row);
       const { sku, itemNumber, master, variation } = productData;
+      let productPermalink = null;
       updateProgressBar(index, masterData.length, itemNumber);
 
       try {
@@ -137,7 +151,8 @@ async function main() {
 
           if (Object.keys(parentUpdatePayload).length > 0) {
             if (UPDATE_WEBSITE_DATA) {
-              await api.put(`products/${parentId}`, parentUpdatePayload);
+              const {data: updatedParent } = await api.put(`products/${parentId}`, parentUpdatePayload);
+              productPermalink = updatedParent.permalink;
             }
             // Update cache on success
             if (parentUpdatePayload.name) itemCache[sku].name = parentUpdatePayload.name;
@@ -172,7 +187,8 @@ async function main() {
 
           if (Object.keys(variationUpdatePayload).length > 0) {
             if (UPDATE_WEBSITE_DATA) {
-              await api.put(`products/${parentId}/variations/${variationId}`, variationUpdatePayload);
+              const { data: updatedVariation } = await api.put(`products/${parentId}/variations/${variationId}`, variationUpdatePayload);
+              productPermalink = updatedVariation.permalink; // Store permalink
             }
             // Update cache on success
             variation.fields.forEach(field => itemCache[sku].variations[itemNumber][field.name] = field.value);
@@ -228,7 +244,10 @@ async function main() {
             parentUpdatePayload.attributes = remoteAttributes;
 
             if (UPDATE_WEBSITE_DATA) {
-              await api.put(`products/${parentProduct.id}`, parentUpdatePayload);
+              const { data: updatedProduct } = await api.put(`products/${parentProduct.id}`, parentUpdatePayload);
+              parentProduct = updatedProduct; // Update parentProduct with the full response
+              productPermalink = updatedProduct.permalink; // Store permalink
+
             }
 
             itemCache[sku] = {
@@ -248,6 +267,7 @@ async function main() {
               const { newProduct, cacheItem } = await createParentProduct(productData, ATTRIBUTES, api);
               parentProduct = newProduct;
               itemCache[sku] = cacheItem;
+              productPermalink = newProduct.permalink;
               updatedItems.push({ itemNumber, sku, variationId: 'N/A', fields: 'New Parent Created' });
             } else {
               errors.push({ index, sku, itemNumber, message: 'Dry Run: Parent would be created.' });
@@ -288,7 +308,8 @@ async function main() {
               });
             });
             if (UPDATE_WEBSITE_DATA) {
-              await api.put(`products/${parentProduct.id}/variations/${existingVariation.id}`, updatePayload);
+              const { data: updatedVariation } = await api.put(`products/${parentProduct.id}/variations/${existingVariation.id}`, updatePayload);
+              productPermalink = updatedVariation.permalink; // Store permalink
             }
 
             const variationCacheItem = {
@@ -314,21 +335,41 @@ async function main() {
           } else {
             // 4. If not found, it's safe to create a new one.
             if (UPDATE_WEBSITE_DATA) {
-              const newVariationCacheItem = await createProductVariation(productData, parentProduct, ATTRIBUTES, api);
-              itemCache[sku].variations[itemNumber] = newVariationCacheItem;
-              updatedItems.push({ itemNumber, sku, variationId: newVariationCacheItem.variationId, fields: 'New Variation Created' });
+              const { newVariation, cacheItem } = await createProductVariation(productData, parentProduct, ATTRIBUTES, api);
+              itemCache[sku].variations[itemNumber] = cacheItem;
+              productPermalink = newVariation.permalink; // Store permalink
+              updatedItems.push({ itemNumber, sku, variationId: newVariation.id, fields: 'New Variation Created' });
             }
             else {
               errors.push({ index, sku, itemNumber, message: 'Dry Run: Variation would be created.' });
             }
           }
         }
+        if (productPermalink && urlColumnIndex !== -1) {
+        // Excel rows are 1-based, and we have a header row, so data starts at row 2.
+        productPermalink = productPermalink.split("?")[0];
+        const rowIndex = index + 2; 
+        
+        // Convert the 0-based column index to an Excel column letter (A, B, C...)
+        const colLetter = xlsx.utils.encode_col(urlColumnIndex + 1);
+        
+        // Construct the cell address (e.g., "G2", "G3", etc.)
+        const cellAddress = `${colLetter}${rowIndex}`;
+        
+        // Create or update the cell in the worksheet object
+        xlsx.utils.sheet_add_aoa(worksheet, [[productPermalink]], { origin: cellAddress });
+
+      }
+
+
       } catch (error) {
         const errorMessage = error.response?.data?.message || error.message;
         errors.push({ index, sku, itemNumber, message: errorMessage });
       }
     }
     // --- Finalize ---
+    console.log(outputFilePath);
+    writeUpdatedWorkbook(outputFilePath, workbook);
     writeCache(CACHE_FILE, itemCache);
     writeUpdatedProductsLog(LOG_FILE, updatedItems);
     writeErrorsLog(DEBUG_FILE, errors);

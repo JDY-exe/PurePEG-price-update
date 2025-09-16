@@ -187,6 +187,7 @@ export async function createProductVariation(productData, parentProduct, allAttr
     cacheItem[item.name || item.key] = item.value;
   });
 
-  return cacheItem;
+  // Return both the full API response and the cache item
+  return { newVariation, cacheItem };
 }
 

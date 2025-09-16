@@ -27,11 +27,17 @@ export async function selectExcelFile(folderPath) {
 /**
  * Reads and parses the selected Excel file.
  */
-export function readExcelData(filePath) {
+export function readExcelWorkbook(filePath) {
+  console.log(`\nReading Excel file: ${path.basename(filePath)}`);
   const workbook = XLSX.readFile(filePath);
   const firstSheetName = workbook.SheetNames[0];
-  return XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName]);
+  const worksheet = workbook.Sheets[firstSheetName];
+  const data = XLSX.utils.sheet_to_json(worksheet);
+  console.log(`Found ${data.length} rows to process.`);
+  return { workbook, worksheet, data };
 }
+
+
 
 /**
  * Loads the cache from a JSON file.
@@ -75,3 +81,18 @@ export function writeErrorsLog(debugFile, errors) {
   fs.writeFileSync(debugFile, header + rows);
   console.log(`Errors log saved to ${debugFile}`);
 }
+
+/**
+ * Writes an array of objects to a new Excel file.
+ * @param {string} filePath - The full path for the new Excel file.
+ * @param {Array<Object>} data - The array of row objects to write.
+ */
+export function writeUpdatedWorkbook(filePath, workbook) {
+  try {
+    XLSX.writeFile(workbook, filePath);
+    console.log(`\n💾 Formatted workbook saved to: ${filePath}`);
+  } catch (error) {
+    console.error(`❌ Error writing workbook to file: ${error.message}`);
+  }
+}
+
