@@ -24,7 +24,8 @@ export function mapRowToProductData(row) {
         { name: "PEG-Length", value: row["PEG Length"], isVisible: false, position: 10 },
         { name: "Functional Group Prefix", value: row["Functional Group Prefix"], isVisible: false, position: 11 }
       ],
-      categories: row["Categories"]
+      categories: row["Categories"],
+      permalink: row["Product URL"]
     },
     variation: {
       fields: [

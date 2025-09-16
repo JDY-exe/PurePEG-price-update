@@ -198,6 +198,11 @@ async function main() {
           if (fieldsUpdated.length > 0) {
             updatedItems.push({ itemNumber, sku, variationId, fields: fieldsUpdated.map(f => f.field).join(' / ') });
           }
+          if (productPermalink == null && !productData.master.permalink) {
+            const { data: webData } = await api.get(`products/${parentId}/variations/${variationId}`);
+            productPermalink = webData.permalink;
+            insertURLIntoWorksheet(productPermalink, index, urlColumnIndex, worksheet)
+          }
           continue; // Move to next item
         }
 
@@ -346,20 +351,8 @@ async function main() {
           }
         }
         if (productPermalink && urlColumnIndex !== -1) {
-        // Excel rows are 1-based, and we have a header row, so data starts at row 2.
-        productPermalink = productPermalink.split("?")[0];
-        const rowIndex = index + 2; 
-        
-        // Convert the 0-based column index to an Excel column letter (A, B, C...)
-        const colLetter = xlsx.utils.encode_col(urlColumnIndex + 1);
-        
-        // Construct the cell address (e.g., "G2", "G3", etc.)
-        const cellAddress = `${colLetter}${rowIndex}`;
-        
-        // Create or update the cell in the worksheet object
-        xlsx.utils.sheet_add_aoa(worksheet, [[productPermalink]], { origin: cellAddress });
-
-      }
+          insertURLIntoWorksheet(productPermalink, index, urlColumnIndex, worksheet)
+        }
 
 
       } catch (error) {
@@ -382,6 +375,22 @@ async function main() {
     console.error(`\n\nA critical error occurred: ${error.message}`);
     process.exit(1);
   }
+}
+
+function insertURLIntoWorksheet(productPermalink, index, urlColumnIndex, worksheet) {
+  // Excel rows are 1-based, and we have a header row, so data starts at row 2.
+
+  productPermalink = productPermalink.split("?")[0];
+  const rowIndex = index + 2; 
+  
+  // Convert the 0-based column index to an Excel column letter (A, B, C...)
+  const colLetter = xlsx.utils.encode_col(urlColumnIndex + 1);
+  
+  // Construct the cell address (e.g., "G2", "G3", etc.)
+  const cellAddress = `${colLetter}${rowIndex}`;
+  
+  // Create or update the cell in the worksheet object
+  xlsx.utils.sheet_add_aoa(worksheet, [[productPermalink]], { origin: cellAddress });
 }
 
 main();
