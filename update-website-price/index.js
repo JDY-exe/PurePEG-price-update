@@ -6,6 +6,7 @@ import { selectExcelFile, readExcelWorkbook, loadCache } from './lib/file-handle
 import { mapRowToProductData } from './lib/product-mapper.js';
 import { updateProgressBar } from './lib/utils.js';
 import { getColumnIndex, validateProductData, resolveShippingClassSlug } from './lib/payload-builders.js';
+import { handleStartupUpdate } from './lib/self-update.js';
 import {
   processCachedProductRow,
   resolveParentProduct,
@@ -78,6 +79,11 @@ function getOutputFilePath(excelFilePath) {
  */
 async function main() {
   console.clear();
+
+  const shouldExitAfterUpdate = await handleStartupUpdate(__dirname);
+  if (shouldExitAfterUpdate) {
+    process.exit(0);
+  }
 
   const rootFolder = getRootFolderFromArgs();
   const { CACHE_FILE, LOG_FILE, DEBUG_FILE } = getMetaFilePaths();
