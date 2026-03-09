@@ -1,4 +1,18 @@
-// Helper to process categories
+/**
+ * Domain services that build WooCommerce payloads from normalized row data.
+ */
+
+/**
+ * Resolves workbook category text into WooCommerce category IDs.
+ *
+ * Expected input format supports comma-separated chains such as:
+ * "Chemicals > PEG, Functionalized PEG".
+ * The last segment in each chain is used for lookup.
+ *
+ * @param {string} rawCategories - Raw category string from worksheet.
+ * @param {{get: Function}} api - WooCommerce API client.
+ * @returns {Promise<Array<{id: number}>>}
+ */
 export async function processCategories(rawCategories, api) {
   if (!rawCategories) return [];
   const categoryNames = new Set(
@@ -23,7 +37,14 @@ export async function processCategories(rawCategories, api) {
   return settledPromises.filter(Boolean);
 }
 
-// Helper to format attributes for an API payload
+/**
+ * Maps attribute definitions into WooCommerce-ready payload objects.
+ *
+ * @param {Array<Object>} attributes - Input attributes from mapped worksheet row.
+ * @param {Array<Object>} allAttributesRef - Global WooCommerce attribute references.
+ * @returns {Array<Object>}
+ * @throws {Error} When a named attribute cannot be resolved to a global attribute ID.
+ */
 export function formatAttributes(attributes, allAttributesRef) {
   return attributes.map(attr => {
     const attrRef = allAttributesRef.find(a => a.name === attr.name);
@@ -39,6 +60,16 @@ export function formatAttributes(attributes, allAttributesRef) {
   });
 }
 
+/**
+ * Splits comma-delimited strings while preserving escaped commas (`\\,`).
+ *
+ * Example:
+ * - Input: "PEGylated, alpha\\,omega-bis"
+ * - Output: ["PEGylated", "alpha,omega-bis"]
+ *
+ * @param {string} str - Input string to split.
+ * @returns {Array<string>}
+ */
 export function splitEscapedString(str) {
   const parts = str.split(/(?<!\\),/);
   const result = parts.map(part => part.replace(/\\,/g, ','));
@@ -47,7 +78,12 @@ export function splitEscapedString(str) {
 }
 
 /**
- * Creates a new parent (variable) product.
+ * Creates a new variable parent product and its corresponding cache entry.
+ *
+ * @param {Object} productData - Normalized row payload.
+ * @param {Array<Object>} allAttributesRef - Global WooCommerce attribute references.
+ * @param {{post: Function}} api - WooCommerce API client.
+ * @returns {Promise<{newProduct: Object, cacheItem: Object}>}
  */
 export async function createParentProduct(productData, allAttributesRef, api) {
   const { master, variation, sku } = productData;
@@ -87,6 +123,9 @@ export async function createParentProduct(productData, allAttributesRef, api) {
     attributes: finalAttributes,
     categories: await processCategories(master.categories, api)
   };
+  if (master.shippingClassSlug !== null && master.shippingClassSlug !== undefined) {
+    payload.shipping_class = master.shippingClassSlug;
+  }
 
   // 5. Create the parent product via the API
   const response = await api.post('products', payload);
@@ -98,6 +137,7 @@ export async function createParentProduct(productData, allAttributesRef, api) {
     name: newProduct.name,
     sku: sku,
     categories: master.categories,
+    shipping_class: newProduct.shipping_class ?? (master.shippingClassSlug ?? null),
     attributes: master.attributes.reduce((acc, attr) => {
       acc[attr.name] = attr.value;
       return acc;
@@ -109,7 +149,13 @@ export async function createParentProduct(productData, allAttributesRef, api) {
 }
 
 /**
- * Creates a new product variation.
+ * Creates a variation under an existing parent product and builds cache data.
+ *
+ * @param {Object} productData - Normalized row payload.
+ * @param {Object} parentProduct - Existing parent product from WooCommerce.
+ * @param {Array<Object>} allAttributesRef - Global WooCommerce attribute references.
+ * @param {{post: Function, put: Function}} api - WooCommerce API client.
+ * @returns {Promise<{newVariation: Object, cacheItem: Object}>}
  */
 export async function createProductVariation(productData, parentProduct, allAttributesRef, api) {
   const { variation } = productData;
@@ -131,11 +177,15 @@ export async function createProductVariation(productData, parentProduct, allAttr
   // 1. Ensure the parent product is configured for variations
   const parentAttributes = parentProduct.attributes;
   const variationAttrDef = variation.attribute;
-  const attrForVariation = parentAttributes.find(a => a.name === variationAttrDef.name);
+  let attrForVariation = parentAttributes.find(a => a.name === variationAttrDef.name);
 
   if (!attrForVariation) {
+  const attrRef = allAttributesRef.find(attr => attr.name == variationAttrDef.name);
+  if (!attrRef) {
+    throw new Error(`Could not find a global attribute reference for "${variationAttrDef.name}"`);
+  }
   const newAttribute = {
-    id: allAttributesRef.find(attr => attr.name == variationAttrDef.name).id,
+    id: attrRef.id,
     name: variationAttrDef.name,
     options: [],
     position: variationAttrDef.position,
