@@ -1,7 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { SHIPPING_CLASS_BY_NAME } from './lib/api.js';
+import {
+  CATEGORIES,
+  METADATA_FETCH_ERRORS,
+  SHIPPING_CLASSES,
+  SHIPPING_CLASS_BY_NAME
+} from './lib/api.js';
 import { selectExcelFile, readExcelWorkbook, loadCache } from './lib/file-handler.js';
 import { mapRowToProductData } from './lib/product-mapper.js';
 import { updateProgressBar } from './lib/utils.js';
@@ -51,6 +56,7 @@ function getMetaFilePaths() {
   fs.mkdirSync(metaDir, { recursive: true });
 
   return {
+    META_DIR: metaDir,
     CACHE_FILE: path.join(metaDir, 'product_cache.json'),
     LOG_FILE: path.join(metaDir, 'update_log.csv'),
     DEBUG_FILE: path.join(metaDir, 'debug_log.csv')
@@ -67,6 +73,34 @@ function getOutputFilePath(excelFilePath) {
 }
 
 /**
+ * Builds a descriptive error message from local or WooCommerce API failures.
+ *
+ * @param {Error & {response?: any}} error
+ * @returns {string}
+ */
+function formatProcessingError(error) {
+  const apiStatus = error.response?.status;
+  const apiPayload = error.response?.data;
+  const apiCode = apiPayload?.code;
+  const apiMessage =
+    typeof apiPayload === 'string'
+      ? apiPayload
+      : apiPayload?.message;
+
+  const primary = apiMessage || error.message || 'Unknown error';
+  const details = [];
+
+  if (apiStatus) {
+    details.push(`status=${apiStatus}`);
+  }
+  if (apiCode) {
+    details.push(`code=${apiCode}`);
+  }
+
+  return details.length > 0 ? `${primary} (${details.join(', ')})` : primary;
+}
+
+/**
  * Entry point for the workbook synchronization flow.
  *
  * High-level flow:
@@ -79,6 +113,7 @@ function getOutputFilePath(excelFilePath) {
  */
 async function main() {
   console.clear();
+  const startedAt = new Date();
 
   const shouldExitAfterUpdate = await handleStartupUpdate(__dirname);
   if (shouldExitAfterUpdate) {
@@ -86,7 +121,7 @@ async function main() {
   }
 
   const rootFolder = getRootFolderFromArgs();
-  const { CACHE_FILE, LOG_FILE, DEBUG_FILE } = getMetaFilePaths();
+  const { META_DIR, CACHE_FILE, LOG_FILE, DEBUG_FILE } = getMetaFilePaths();
 
   try {
     const excelFilePath = await selectExcelFile(rootFolder);
@@ -158,12 +193,12 @@ async function main() {
           insertURLIntoWorksheet(productPermalink, index, urlColumnIndex, worksheet);
         }
       } catch (error) {
-        const errorMessage = error.response?.data?.message || error.message;
+        const errorMessage = formatProcessingError(error);
         errors.push({ index, sku, itemNumber, message: errorMessage });
       }
     }
 
-    finalizeRun({
+    await finalizeRun({
       outputFilePath,
       workbook,
       cacheFile: CACHE_FILE,
@@ -171,7 +206,17 @@ async function main() {
       logFile: LOG_FILE,
       updatedItems,
       debugFile: DEBUG_FILE,
-      errors
+      errors,
+      metaDir: META_DIR,
+      excelFilePath,
+      totalRows: masterData.length,
+      startedAt,
+      finishedAt: new Date(),
+      metadata: {
+        shippingClasses: SHIPPING_CLASSES,
+        categories: CATEGORIES,
+        metadataErrors: METADATA_FETCH_ERRORS
+      }
     });
   } catch (error) {
     console.error(`\n\nA critical error occurred: ${error.message}`);

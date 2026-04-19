@@ -11,6 +11,7 @@ import {
   createProductVariation,
   processCategories
 } from './product-service.js';
+import { openReportInBrowser, writeRunReport } from './run-report.js';
 import {
   getFieldValue,
   mergeAttributes,
@@ -64,14 +65,22 @@ export async function processCachedProductRow({
   master.fields.forEach(field => {
     if (cachedItem[field.name] != field.value) {
       parentUpdatePayload[field.name] = field.value;
-      fieldsUpdated.push({ field: field.name, newValue: field.value });
+      fieldsUpdated.push({
+        field: field.name,
+        before: cachedItem[field.name],
+        after: field.value
+      });
     }
   });
 
   const changedAttributes = master.attributes.filter(attr => cachedItem.attributes[attr.name] != attr.value);
   if (changedAttributes.length > 0) {
     changedAttributes.forEach(attr => {
-      fieldsUpdated.push({ field: `Attribute: ${attr.name}`, newValue: attr.value ?? 'N/A' });
+      fieldsUpdated.push({
+        field: `Attribute: ${attr.name}`,
+        before: cachedItem.attributes[attr.name],
+        after: attr.value ?? 'N/A'
+      });
     });
 
     const { data: remoteProduct } = await api.get(`products/${parentId}`, { _fields: 'attributes' });
@@ -81,14 +90,22 @@ export async function processCachedProductRow({
   const categoriesChanged = cachedItem.categories !== master.categories;
   if (categoriesChanged) {
     parentUpdatePayload.categories = await processCategories(master.categories, api);
-    fieldsUpdated.push({ field: 'Categories', newValue: master.categories });
+    fieldsUpdated.push({
+      field: 'Categories',
+      before: cachedItem.categories,
+      after: master.categories
+    });
   }
 
   const shippingClassChanged =
     master.shippingClassSlug !== null && cachedItem.shipping_class !== master.shippingClassSlug;
   if (shippingClassChanged) {
     parentUpdatePayload.shipping_class = master.shippingClassSlug;
-    fieldsUpdated.push({ field: 'shipping_class', newValue: master.shippingClassSlug });
+    fieldsUpdated.push({
+      field: 'shipping_class',
+      before: cachedItem.shipping_class,
+      after: master.shippingClassSlug
+    });
   }
 
   if (Object.keys(parentUpdatePayload).length > 0) {
@@ -120,17 +137,27 @@ export async function processCachedProductRow({
   variation.fields.forEach(field => {
     if (cachedVariation[field.name] != field.value) {
       variationUpdatePayload[field.name] = field.callBackFn ? field.callBackFn(field.value) : field.value;
-      fieldsUpdated.push({ field: field.name, newValue: field.value });
+      fieldsUpdated.push({
+        field: field.name,
+        before: cachedVariation[field.name],
+        after: field.value
+      });
     }
   });
 
-  const metaDataChanged = variation.meta_data.some(meta => cachedVariation[meta.key] != meta.value);
-  if (metaDataChanged) {
+  const changedMetaData = variation.meta_data.filter(meta => cachedVariation[meta.key] != meta.value);
+  if (changedMetaData.length > 0) {
     variationUpdatePayload.meta_data = variation.meta_data.map(meta => ({
       key: meta.key,
       value: meta.callBackFn ? meta.callBackFn(meta.value) : meta.value.toString()
     }));
-    fieldsUpdated.push({ field: 'Meta Data', newValue: 'Updated' });
+    changedMetaData.forEach(meta => {
+      fieldsUpdated.push({
+        field: `meta_data.${meta.key}`,
+        before: cachedVariation[meta.key],
+        after: meta.value
+      });
+    });
   }
 
   if (Object.keys(variationUpdatePayload).length > 0) {
@@ -150,10 +177,12 @@ export async function processCachedProductRow({
 
   if (fieldsUpdated.length > 0) {
     updatedItems.push({
+      rowIndex: index,
       itemNumber,
       sku,
       variationId,
-      fields: fieldsUpdated.map(fieldUpdate => fieldUpdate.field).join(' / ')
+      fields: fieldsUpdated.map(fieldUpdate => fieldUpdate.field).join(' / '),
+      changes: fieldsUpdated
     });
   }
 
@@ -198,14 +227,46 @@ export async function resolveParentProduct({
 
   if (existingProducts.length > 0) {
     let parentProduct = existingProducts[0];
+    const existingCategoryNames = (parentProduct.categories ?? []).map(category => category.name).join(', ');
+    const parentChanges = [{
+      field: 'Parent Product',
+      kind: 'info',
+      after: `Adopted existing parent ID ${parentProduct.id}`
+    }];
     const parentUpdatePayload = {
       name: getFieldValue(master.fields, 'name'),
       categories: await processCategories(master.categories, api),
       attributes: mergeAttributes(parentProduct.attributes, master.attributes, ATTRIBUTES)
     };
+    if (parentProduct.name !== parentUpdatePayload.name) {
+      parentChanges.push({
+        field: 'name',
+        before: parentProduct.name,
+        after: parentUpdatePayload.name
+      });
+    }
+    if ((existingCategoryNames || '') !== (master.categories || '')) {
+      parentChanges.push({
+        field: 'Categories',
+        before: existingCategoryNames || '(none)',
+        after: master.categories || '(none)'
+      });
+    }
     if (master.shippingClassSlug !== null) {
       parentUpdatePayload.shipping_class = master.shippingClassSlug;
+      if (parentProduct.shipping_class !== master.shippingClassSlug) {
+        parentChanges.push({
+          field: 'shipping_class',
+          before: parentProduct.shipping_class || '(none)',
+          after: master.shippingClassSlug
+        });
+      }
     }
+    parentChanges.push({
+      field: 'Attributes',
+      kind: 'info',
+      after: `Merged ${master.attributes.length} worksheet attribute(s)`
+    });
 
     let productPermalink = null;
     if (updateWebsiteData) {
@@ -223,10 +284,12 @@ export async function resolveParentProduct({
     });
 
     updatedItems.push({
+      rowIndex: index,
       itemNumber,
       sku,
       variationId: 'N/A',
-      fields: 'Parent Adopted & Synced from Sheet'
+      fields: parentChanges.map(change => change.field).join(' / '),
+      changes: parentChanges
     });
 
     return { parentProduct, productPermalink, skipRow: false };
@@ -239,12 +302,35 @@ export async function resolveParentProduct({
 
   const { newProduct, cacheItem } = await createParentProduct(productData, ATTRIBUTES, api);
   itemCache[sku] = cacheItem;
+  const createdParentChanges = [
+    {
+      field: 'Parent Product',
+      kind: 'info',
+      after: `Created new parent ID ${newProduct.id}`
+    },
+    {
+      field: 'name',
+      after: newProduct.name
+    },
+    {
+      field: 'Categories',
+      after: master.categories || '(none)'
+    }
+  ];
+  if (master.shippingClassSlug !== null) {
+    createdParentChanges.push({
+      field: 'shipping_class',
+      after: master.shippingClassSlug
+    });
+  }
 
   updatedItems.push({
+    rowIndex: index,
     itemNumber,
     sku,
     variationId: 'N/A',
-    fields: 'New Parent Created'
+    fields: createdParentChanges.map(change => change.field).join(' / '),
+    changes: createdParentChanges
   });
 
   return {
@@ -293,6 +379,34 @@ export async function resolveOrCreateVariation({
 
   if (existingVariation) {
     let productPermalink = null;
+    const variationChanges = [{
+      field: 'Variation',
+      kind: 'info',
+      after: `Adopted existing variation ID ${existingVariation.id}`
+    }];
+
+    variation.fields.forEach(field => {
+      if (existingVariation[field.name] != field.value) {
+        variationChanges.push({
+          field: field.name,
+          before: existingVariation[field.name],
+          after: field.value
+        });
+      }
+    });
+
+    variation.meta_data.forEach(meta => {
+      const existingMeta = (existingVariation.meta_data ?? []).find(metaRow => metaRow.key === meta.key);
+      const existingMetaValue = existingMeta?.value;
+      if (existingMetaValue != meta.value) {
+        variationChanges.push({
+          field: `meta_data.${meta.key}`,
+          before: existingMetaValue,
+          after: meta.value
+        });
+      }
+    });
+
     const updatePayload = buildVariationPayload(variation);
 
     if (updateWebsiteData) {
@@ -306,10 +420,12 @@ export async function resolveOrCreateVariation({
     itemCache[sku].variations[itemNumber] = buildVariationCacheItem(variation, existingVariation.id);
 
     updatedItems.push({
+      rowIndex: index,
       itemNumber,
       sku,
       variationId: existingVariation.id,
-      fields: 'Variation Adopted & Synced from Sheet'
+      fields: variationChanges.map(change => change.field).join(' / '),
+      changes: variationChanges
     });
 
     return { productPermalink };
@@ -322,12 +438,33 @@ export async function resolveOrCreateVariation({
 
   const { newVariation, cacheItem } = await createProductVariation(productData, parentProduct, ATTRIBUTES, api);
   itemCache[sku].variations[itemNumber] = cacheItem;
+  const createdVariationChanges = [
+    {
+      field: 'Variation',
+      kind: 'info',
+      after: `Created new variation ID ${newVariation.id}`
+    }
+  ];
+  variation.fields.forEach(field => {
+    createdVariationChanges.push({
+      field: field.name,
+      after: field.value
+    });
+  });
+  variation.meta_data.forEach(meta => {
+    createdVariationChanges.push({
+      field: `meta_data.${meta.key}`,
+      after: meta.value
+    });
+  });
 
   updatedItems.push({
+    rowIndex: index,
     itemNumber,
     sku,
     variationId: newVariation.id,
-    fields: 'New Variation Created'
+    fields: createdVariationChanges.map(change => change.field).join(' / '),
+    changes: createdVariationChanges
   });
 
   return { productPermalink: newVariation.permalink };
@@ -345,9 +482,15 @@ export async function resolveOrCreateVariation({
  * @param {Array<Object>} args.updatedItems
  * @param {string} args.debugFile
  * @param {Array<Object>} args.errors
- * @returns {void}
+ * @param {string} args.metaDir
+ * @param {string} args.excelFilePath
+ * @param {number} args.totalRows
+ * @param {Date|string|number} args.startedAt
+ * @param {Date|string|number} args.finishedAt
+ * @param {Object} args.metadata
+ * @returns {Promise<string>}
  */
-export function finalizeRun({
+export async function finalizeRun({
   outputFilePath,
   workbook,
   cacheFile,
@@ -355,7 +498,13 @@ export function finalizeRun({
   logFile,
   updatedItems,
   debugFile,
-  errors
+  errors,
+  metaDir,
+  excelFilePath,
+  totalRows,
+  startedAt,
+  finishedAt,
+  metadata
 }) {
   console.log(outputFilePath);
   writeUpdatedWorkbook(outputFilePath, workbook);
@@ -370,6 +519,32 @@ export function finalizeRun({
   if (errors.length > 0) {
     console.log(`Encountered ${errors.length} errors. Check ${debugFile} for details.\n`);
   }
+
+  const reportPath = writeRunReport({
+    metaDir,
+    excelFilePath,
+    outputFilePath,
+    logFile,
+    debugFile,
+    cacheFile,
+    updatedItems,
+    errors,
+    totalRows,
+    startedAt,
+    finishedAt,
+    metadata
+  });
+
+  console.log(`Run report saved to ${reportPath}`);
+
+  try {
+    await openReportInBrowser(reportPath);
+    console.log('Opened run report in default browser.');
+  } catch (error) {
+    console.warn(`Could not auto-open run report: ${error.message}`);
+  }
+
+  return reportPath;
 }
 
 /**

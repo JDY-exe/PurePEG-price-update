@@ -66,6 +66,38 @@ async function fetchAllShippingClasses(baseUrl, consumerKey, consumerSecret) {
 }
 
 /**
+ * Fetches all product categories from WooCommerce via v3 API.
+ *
+ * @param {{get: Function}} apiClient
+ * @returns {Promise<Array<Object>>}
+ */
+async function fetchAllCategories(apiClient) {
+  const perPage = 100;
+  let page = 1;
+  let allCategories = [];
+
+  while (true) {
+    const response = await apiClient.get('products/categories', {
+      per_page: perPage,
+      page
+    });
+
+    if (!Array.isArray(response.data)) {
+      throw new Error('Categories response was not an array.');
+    }
+
+    allCategories = allCategories.concat(response.data);
+    if (response.data.length < perPage) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return allCategories;
+}
+
+/**
  * Builds case-insensitive lookup map: shipping class name -> slug.
  * Throws if duplicate names map to different slugs.
  *
@@ -107,6 +139,16 @@ let SHIPPING_CLASSES = [];
  * @type {Object<string, string>}
  */
 let SHIPPING_CLASS_BY_NAME = {};
+/**
+ * Cached product category definitions loaded at startup.
+ * @type {Array<Object>}
+ */
+let CATEGORIES = [];
+/**
+ * Non-fatal metadata fetch warnings captured at startup.
+ * @type {Array<string>}
+ */
+let METADATA_FETCH_ERRORS = [];
 
 try {
   const response = await api.get('products/attributes');
@@ -130,4 +172,13 @@ try {
   process.exit(1);
 }
 
-export { api, ATTRIBUTES, SHIPPING_CLASSES, SHIPPING_CLASS_BY_NAME };
+try {
+  CATEGORIES = await fetchAllCategories(api);
+  console.log(`[OK] Fetched ${CATEGORIES.length} product categor${CATEGORIES.length === 1 ? 'y' : 'ies'} successfully.`);
+} catch (error) {
+  const warningMessage = `Failed to fetch WooCommerce categories metadata: ${error.message}`;
+  METADATA_FETCH_ERRORS.push(warningMessage);
+  console.warn(`[WARN] ${warningMessage}`);
+}
+
+export { api, ATTRIBUTES, SHIPPING_CLASSES, SHIPPING_CLASS_BY_NAME, CATEGORIES, METADATA_FETCH_ERRORS };
