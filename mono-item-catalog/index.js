@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import ExcelJS from 'exceljs';
 import XLSX from 'xlsx';
 import inquirer from 'inquirer';
 
@@ -29,7 +28,7 @@ async function main() {
         // --- Step 2: Group all variations by their parent SKU ---
         console.log('🔄 Grouping variations by SKU...');
         const productsBySku = {};
-        const variationFields = ["Item #", "Weight (g)", "Purity", "List Price"];
+        const variationFields = ["Item #", "Weight (g)", "Purity", "List Price", "Sale Price"];
 
         for (const row of sourceData) {
             const sku = row['SKU'];
@@ -82,6 +81,7 @@ async function main() {
                 newRow[`Variation ${i} Weight (g)`] = variation["Weight (g)"];
                 newRow[`Variation ${i} Purity`] = variation["Purity"];
                 newRow[`Variation ${i} List Price`] = variation["List Price"];
+                newRow[`Variation ${i} Sale Price`] = variation["Sale Price"];
             });
 
             outputRows.push(newRow);

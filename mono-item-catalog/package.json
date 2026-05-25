@@ -1,4 +1,5 @@
 {
+  "type": "module",
   "dependencies": {
     "exceljs": "^4.4.0",
     "fs": "^0.0.1-security",
