@@ -21,7 +21,7 @@ async function main() {
         process.exit(1);
     }
     const excelFilePath = await selectExcelFile(rootFolder);
-    const sourceData = readExcelData(excelFilePath);
+    const { rows: sourceData, headers: sourceHeaders } = readExcelData(excelFilePath);
 
     try {
 
@@ -69,9 +69,18 @@ async function main() {
             }
         }
 
+        const parentHeaders = sourceHeaders.filter(header => !variationFields.includes(header));
+        const outputHeaders = [...parentHeaders];
+        for (let i = 1; i <= maxVariations; i++) {
+            for (const field of variationFields) {
+                outputHeaders.push(`Variation ${i} ${field}`);
+            }
+        }
+
         // Create the new rows
         for (const sku in productsBySku) {
             const product = productsBySku[sku];
+            product.variations.sort(compareVariations);
             const newRow = { ...product.parentData };
 
             // Add each variation as a set of new columns
@@ -93,7 +102,7 @@ async function main() {
         const outputDirectory = "mono-item-catalog"
         console.log(`\n✍️ Writing ${outputRows.length} products to "${outputFileName}"...`);
 
-        const newWorksheet = XLSX.utils.json_to_sheet(outputRows);
+        const newWorksheet = XLSX.utils.json_to_sheet(outputRows, { header: outputHeaders });
         const newWorkbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, 'Restructured Data');
         XLSX.writeFile(newWorkbook, path.join(outputDirectory, outputFileName));
@@ -130,6 +139,32 @@ async function selectExcelFile(folderPath) {
 function readExcelData(filePath) {
     const workbook = XLSX.readFile(filePath);
     const firstSheetName = workbook.SheetNames[0];
-    return XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName]);
+    const worksheet = workbook.Sheets[firstSheetName];
+    const headerRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, range: 0, blankrows: false });
+    const headers = (headerRows[0] || []).filter(header => header !== undefined && header !== null && header !== '');
+    return {
+        rows: XLSX.utils.sheet_to_json(worksheet),
+        headers
+    };
 }
+
+function toNumber(value) {
+    const number = Number(String(value ?? '').replace(/[$,]/g, ''));
+    return Number.isFinite(number) ? number : Number.POSITIVE_INFINITY;
+}
+
+function compareVariations(a, b) {
+    const aHasLSuffix = hasLSuffix(a["Item #"]);
+    const bHasLSuffix = hasLSuffix(b["Item #"]);
+    if (aHasLSuffix !== bHasLSuffix) {
+        return aHasLSuffix ? -1 : 1;
+    }
+
+    return toNumber(a["List Price"]) - toNumber(b["List Price"]);
+}
+
+function hasLSuffix(value) {
+    return String(value ?? '').trim().toUpperCase().endsWith('L');
+}
+
 main();
