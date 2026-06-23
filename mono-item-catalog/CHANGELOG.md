@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-06-23
+
+- Updated the website price sync variation mapping to read the spreadsheet `Sale Price` column and send it to WooCommerce as `sale_price`.
+- Blank `Sale Price` values now send an empty `sale_price`, allowing existing variation sale prices to be cleared.
+
 ## 2026-06-05 (In email correspondence with Rebecca's email on Jun 3, 2026)
 
 - Preserved the original parent-column order by reading the first worksheet header row and passing an explicit output header list to SheetJS.

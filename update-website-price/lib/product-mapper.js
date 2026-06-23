@@ -57,6 +57,14 @@
 export function mapRowToProductData(row) {
   const itemNumber = row["Item #"];
   const sku = row["SKU"];
+  const formatPrice = (val) => val.toFixed(2);
+  const formatOptionalPrice = (val) => {
+    if (val === null || val === undefined || val === '') {
+      return '';
+    }
+
+    return Number(val).toFixed(2);
+  };
 
   const productData = {
     itemNumber,
@@ -87,7 +95,8 @@ export function mapRowToProductData(row) {
     },
     variation: {
       fields: [
-        { name: "regular_price", value: row["List Price"], required: true, callBackFn: (val) => val.toFixed(2) },
+        { name: "regular_price", value: row["List Price"], required: true, callBackFn: formatPrice },
+        { name: "sale_price", value: row["Sale Price"] ?? '', callBackFn: formatOptionalPrice },
         { name: "weight", value: row["Weight (g)"], required: true, callBackFn: (val) => val.toString() }
       ],
       meta_data: [
