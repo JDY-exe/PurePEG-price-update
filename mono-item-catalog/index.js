@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import XLSX from 'xlsx';
 import inquirer from 'inquirer';
+import { keepLowestPurityVariations } from './variation-strategy.js';
 
 /**
  * This script combines two processes into a single, in-memory operation:
@@ -54,6 +55,15 @@ async function main() {
                 variationData[field] = row[field];
             }
             productsBySku[sku].variations.push(variationData);
+        }
+
+        // Strategy 1: for each product, output only its lowest-purity group.
+        // Purity is used instead of Item # suffixes because H/L is not present
+        // consistently in the source data.
+        for (const sku in productsBySku) {
+            productsBySku[sku].variations = keepLowestPurityVariations(
+                productsBySku[sku].variations
+            );
         }
 
         // --- Step 3: Flatten the grouped data into the final row format ---
@@ -154,17 +164,7 @@ function toNumber(value) {
 }
 
 function compareVariations(a, b) {
-    const aHasLSuffix = hasLSuffix(a["Item #"]);
-    const bHasLSuffix = hasLSuffix(b["Item #"]);
-    if (aHasLSuffix !== bHasLSuffix) {
-        return aHasLSuffix ? -1 : 1;
-    }
-
     return toNumber(a["List Price"]) - toNumber(b["List Price"]);
-}
-
-function hasLSuffix(value) {
-    return String(value ?? '').trim().toUpperCase().endsWith('L');
 }
 
 main();

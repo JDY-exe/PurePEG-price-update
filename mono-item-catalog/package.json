@@ -1,5 +1,8 @@
 {
   "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "exceljs": "^4.4.0",
     "fs": "^0.0.1-security",
